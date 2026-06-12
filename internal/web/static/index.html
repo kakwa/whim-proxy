@@ -54,10 +54,6 @@
       font-family: monospace;
     }
     .note { color: #555; font-size: .9rem; margin-top: .6rem; }
-    .badge { display: inline-block; padding: .15em .45em; border-radius: 3px; font-size: .78em; font-weight: 600; font-family: monospace; vertical-align: middle; }
-    .method-any  { background: #dbeafe; color: #1e40af; }
-    .method-get  { background: #dcfce7; color: #166534; }
-    .method-ws   { background: #fef9c3; color: #854d0e; }
   </style>
 </head>
 <body>
@@ -65,7 +61,7 @@
 <header>
   <img src="/favicon.svg" alt="whim-proxy logo">
   <h1>whim-proxy</h1>
-  <p class="tagline">WebHook In the Middle Proxy &mdash; route external webhooks to your local dev machine.</p>
+  <p class="tagline">WebHook In the Middle Proxy</p>
   <p class="version">version: {{.Version}}</p>
 </header>
 
@@ -73,15 +69,16 @@
   <h2>Quick start</h2>
   <pre><span class="comment"># 1. Generate a channel UUID</span>
 CHANNEL=$(./whim-client --gen-uuid)
+echo "$CHANNEL"
 
 <span class="comment"># 2. Start the client on your laptop</span>
 ./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --target http://localhost:8080
 
 <span class="comment"># 3. Configure your webhook sender to POST to:</span>
-<span class="comment">#    http://{{.Host}}/hook/$CHANNEL</span>
+echo "http://{{.Host}}/hook/$CHANNEL"
 
 <span class="comment"># 4. Check received events:</span>
-<span class="comment">#    http://{{.Host}}/logs/$CHANNEL</span></pre>
+echo "http://{{.Host}}/logs/$CHANNEL"</pre>
 </section>
 
 <section>
@@ -106,31 +103,10 @@ CHANNEL=$(./whim-client --gen-uuid)
 </section>
 
 <section>
-  <h2>API</h2>
-  <table>
-    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
-    <tr>
-      <td><span class="badge method-any">*</span></td>
-      <td><code>/hook/{uuid}</code></td>
-      <td>Receive a webhook and broadcast it to all subscribers on the channel</td>
-    </tr>
-    <tr>
-      <td><span class="badge method-ws">WS</span></td>
-      <td><code>/subscribe/{uuid}</code></td>
-      <td>Subscribe to a channel — events are streamed as JSON over WebSocket</td>
-    </tr>
-    <tr>
-      <td><span class="badge method-get">GET</span></td>
-      <td><code>/logs/{uuid}</code></td>
-      <td>Return the last 10 events received on a channel (JSON array)</td>
-    </tr>
-    <tr>
-      <td><span class="badge method-get">GET</span></td>
-      <td><code>/clients/{file}</code></td>
-      <td>Download a pre-built client binary</td>
-    </tr>
-  </table>
-  <p class="note">Channel names must be valid UUIDs. Use <code>--gen-uuid</code> to generate one.</p>
+  <p class="note">
+    Full documentation, source code, and releases:
+    <a href="https://github.com/kakwa/whim-proxy">github.com/kakwa/whim-proxy</a>
+  </p>
 </section>
 
 </body>
