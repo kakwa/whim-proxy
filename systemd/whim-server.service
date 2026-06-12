@@ -10,6 +10,10 @@ RestartSec=5s
 User=whim
 Group=whim
 
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=whim-server
+
 # Hardening
 NoNewPrivileges=true
 PrivateTmp=true
