@@ -8,7 +8,9 @@ GIT_VERSION := $(shell git -C . describe --tags --always --dirty 2>/dev/null)
 ifneq ($(GIT_VERSION),)
   VERSION := $(GIT_VERSION)
 endif
-LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+LDFLAGS      := -ldflags "-X main.version=$(VERSION)"
+# Distribution builds: strip debug info and disable CGO for static/portable binaries.
+DIST_LDFLAGS := -ldflags "-X main.version=$(VERSION) -s -w"
 
 .PHONY: all build server client clients run-server run-client clean test coverage vet fmt tag
 
@@ -25,7 +27,7 @@ clients:
 		ext=""; \
 		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
 		echo "  building client $$os/$$arch"; \
-		GOOS=$$os GOARCH=$$arch go build $(LDFLAGS) \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(DIST_LDFLAGS) \
 			-o $(WEB_CLIENTS)/whim-client-$$os-$$arch$$ext \
 			./cmd/client; \
 	done
