@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -170,6 +171,15 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 	n := ch.broadcast(data)
 	log.Printf("[webhook] id=%s channel=%s method=%s path=%s query=%q body_bytes=%d subscribers=%d",
 		event.ID, channelName, event.Method, event.Path, event.Query, len(body), n)
+
+	if n >= 1 && len(body) > 0 {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, body, "", "  "); err == nil {
+			log.Printf("[webhook] id=%s payload:\n%s", event.ID, pretty.String())
+		} else {
+			log.Printf("[webhook] id=%s payload:\n%s", event.ID, body)
+		}
+	}
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
