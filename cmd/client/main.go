@@ -68,7 +68,9 @@ func replay(logger *zap.Logger, event types.WebhookEvent, target string) {
 func connect(logger *zap.Logger, wsURL string, target string) error {
 	logger.Info("client connecting", zap.String("url", wsURL))
 
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	header := http.Header{}
+	header.Set("X-Whim-Proxy-Client", version)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		if resp != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

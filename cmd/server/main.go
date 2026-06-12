@@ -248,6 +248,7 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("ws subscriber connected",
 		zap.String("channel", channelName),
 		zap.String("remote", r.RemoteAddr),
+		zap.String("client_version", r.Header.Get("X-Whim-Proxy-Client")),
 		zap.Int("total", ch.count()),
 	)
 
