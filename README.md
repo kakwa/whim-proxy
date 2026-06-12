@@ -3,11 +3,9 @@
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
-**Whim-proxy** (WebHook In the Middle Proxy) bridges external webhook senders and local development machines that are not publicly reachable.
+**Whim-proxy** (WebHook In the Middle Proxy) is a lightweight webhook proxy server+client combo designed to help developers test their local webhook consumer against real events, when running the webhook producer locally is not an option.
 
-The typical problem: a third-party service (GitHub, Stripe, etc.) needs to POST events to your webhook handler, but your handler runs on a laptop behind NAT. Whim-proxy solves this without requiring port forwarding, VPNs, or tunnelling services. You deploy a small `whim-server` on any public host, and run `whim-client` on your laptop. The client opens a persistent WebSocket to the server; every incoming webhook is forwarded over that tunnel and replayed verbatim to your local service.
-
-Each channel is identified by a **UUID**. The client generates one automatically on first run if you do not specify one — copy it from the log and use it to configure your webhook sender. Because UUIDs are unguessable, no authentication is required between the sender and the server.
+It works by deploying a `whim-server` on any publicly reachable host, and running `whim-client` on your development machine. The client subscribes to a named channel over a persistent WebSocket connection; every webhook the server receives on that channel is forwarded over the tunnel and replayed verbatim to your local service — same method, path, query string, headers, and body.
 
 ## Quick start
 
