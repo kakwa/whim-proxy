@@ -317,7 +317,10 @@ func TestLogsHandlerCapsAtTen(t *testing.T) {
 		http.DefaultClient.Do(req)
 	}
 
-	resp, _ := http.Get(ts.URL + "/logs/" + ch)
+	resp, err := http.Get(ts.URL + "/logs/" + ch)
+	if err != nil {
+		t.Fatalf("get logs: %v", err)
+	}
 	defer resp.Body.Close()
 
 	var events []types.WebhookEvent
