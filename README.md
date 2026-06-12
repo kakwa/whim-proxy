@@ -1,5 +1,8 @@
 # whim-proxy
 
+[![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
+
 A lightweight webhook proxy with a publish/subscribe architecture. Send webhooks
 to the **server**; one or more **clients** receive and replay them against a
 local HTTP target. Ideal for exposing a local service to external webhook
