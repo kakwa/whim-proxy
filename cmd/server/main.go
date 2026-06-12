@@ -17,6 +17,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/whim-proxy/internal/store"
 	"github.com/whim-proxy/internal/types"
 	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
@@ -126,15 +127,17 @@ func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 
 // server wires together the HTTP handlers and the hub.
 type server struct {
-	hub      *hub
-	upgrader websocket.Upgrader
-	logger   *zap.Logger
+	hub        *hub
+	upgrader   websocket.Upgrader
+	logger     *zap.Logger
+	eventStore store.EventStore
 }
 
-func newServer(logger *zap.Logger) *server {
+func newServer(logger *zap.Logger, eventStore store.EventStore) *server {
 	return &server{
-		hub:    newHub(),
-		logger: logger,
+		hub:        newHub(),
+		logger:     logger,
+		eventStore: eventStore,
 		upgrader: websocket.Upgrader{
 			// Allow all origins for a local dev proxy tool.
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -186,6 +189,11 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.hub.getOrCreate(channelName)
 	n := ch.broadcast(data)
+
+	if err := s.eventStore.Push(channelName, event); err != nil {
+		s.logger.Error("event store push error", zap.Error(err))
+	}
+
 	s.logger.Info("webhook",
 		zap.String("id", event.ID),
 		zap.String("channel", channelName),
@@ -277,6 +285,33 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+// logsHandler returns the last 10 events received on the named channel.
+func (s *server) logsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	channelName := vars["channel"]
+
+	if !uuid.Valid(channelName) {
+		http.Error(w, "channel must be a valid UUID", http.StatusBadRequest)
+		return
+	}
+
+	events, err := s.eventStore.Recent(channelName, 10)
+	if err != nil {
+		s.logger.Error("logs fetch error", zap.String("channel", channelName), zap.Error(err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if events == nil {
+		events = []types.WebhookEvent{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Whim-Proxy-Server", version)
+	if err := json.NewEncoder(w).Encode(events); err != nil {
+		s.logger.Error("logs encode error", zap.Error(err))
+	}
+}
+
 func buildRouter(logger *zap.Logger, srv *server) http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/hook/{channel}", srv.hookHandler).Methods(
@@ -288,6 +323,7 @@ func buildRouter(logger *zap.Logger, srv *server) http.Handler {
 		http.MethodOptions,
 	)
 	r.HandleFunc("/subscribe/{channel}", srv.subscribeHandler)
+	r.HandleFunc("/logs/{channel}", srv.logsHandler).Methods(http.MethodGet)
 	return loggingMiddleware(logger, r)
 }
 
@@ -310,6 +346,9 @@ func main() {
 	addr := flag.String("addr", ":9000", "listen address")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	jsonLog := flag.Bool("json", false, "output logs in JSON format")
+	backlogSize := flag.Int("backlog-size", 10000, "max events kept in the in-memory store (global across all channels)")
+	redisURL := flag.String("redis-url", "", "Redis URL (redis://...) — enables Redis store instead of in-memory")
+	redisTTL := flag.Duration("redis-ttl", 24*time.Hour, "TTL applied to each Redis channel key after its last write (0 = no expiry)")
 	flag.Parse()
 
 	logger, err := buildLogger(*logLevel, *jsonLog)
@@ -319,7 +358,20 @@ func main() {
 	}
 	defer logger.Sync()
 
-	srv := newServer(logger)
+	var eventStore store.EventStore
+	if *redisURL != "" {
+		rs, err := store.NewRedis(*redisURL, *redisTTL, *backlogSize)
+		if err != nil {
+			logger.Fatal("redis init failed", zap.Error(err))
+		}
+		logger.Info("using Redis store", zap.String("url", *redisURL), zap.Duration("ttl", *redisTTL))
+		eventStore = rs
+	} else {
+		logger.Info("using in-memory store", zap.Int("backlog_size", *backlogSize))
+		eventStore = store.NewMemory(*backlogSize)
+	}
+
+	srv := newServer(logger, eventStore)
 	logger.Info("server listening", zap.String("addr", *addr))
 	if err := http.ListenAndServe(*addr, buildRouter(logger, srv)); err != nil {
 		logger.Fatal("server fatal", zap.Error(err))

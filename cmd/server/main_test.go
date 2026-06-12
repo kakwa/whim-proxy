@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,10 +10,17 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/whim-proxy/internal/store"
 	"github.com/whim-proxy/internal/types"
 	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
 )
+
+func newTestServer() (*server, *httptest.Server) {
+	srv := newServer(zap.NewNop(), store.NewMemory(100))
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	return srv, ts
+}
 
 func TestHubGetOrCreate(t *testing.T) {
 	h := newHub()
@@ -81,8 +89,7 @@ func TestChannelBroadcastDropsSlowSubscriber(t *testing.T) {
 }
 
 func TestHookHandlerReturns200(t *testing.T) {
-	srv := newServer(zap.NewNop())
-	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	_, ts := newTestServer()
 	defer ts.Close()
 
 	ch := uuid.New()
@@ -102,8 +109,7 @@ func TestHookHandlerReturns200(t *testing.T) {
 }
 
 func TestHookHandlerRejects400OnInvalidChannel(t *testing.T) {
-	srv := newServer(zap.NewNop())
-	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	_, ts := newTestServer()
 	defer ts.Close()
 
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/not-a-uuid", strings.NewReader(`{}`))
@@ -118,8 +124,7 @@ func TestHookHandlerRejects400OnInvalidChannel(t *testing.T) {
 }
 
 func TestSubscribeHandlerRejects400OnInvalidChannel(t *testing.T) {
-	srv := newServer(zap.NewNop())
-	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	_, ts := newTestServer()
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/subscribe/not-a-uuid")
@@ -133,8 +138,7 @@ func TestSubscribeHandlerRejects400OnInvalidChannel(t *testing.T) {
 }
 
 func TestSubscribeHandlerUpgradeError(t *testing.T) {
-	srv := newServer(zap.NewNop())
-	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	_, ts := newTestServer()
 	defer ts.Close()
 
 	// Plain HTTP GET (no WS upgrade headers) — upgrader writes 400 and returns.
@@ -149,8 +153,7 @@ func TestSubscribeHandlerUpgradeError(t *testing.T) {
 }
 
 func TestWebSocketReceivesWebhookEvent(t *testing.T) {
-	srv := newServer(zap.NewNop())
-	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	_, ts := newTestServer()
 	defer ts.Close()
 
 	ch := uuid.New()
@@ -192,5 +195,98 @@ func TestWebSocketReceivesWebhookEvent(t *testing.T) {
 	}
 	if event.ID == "" {
 		t.Error("ID must not be empty")
+	}
+}
+
+func TestLogsHandlerReturnsEvents(t *testing.T) {
+	_, ts := newTestServer()
+	defer ts.Close()
+
+	ch := uuid.New()
+
+	// Post two webhooks.
+	for _, body := range []string{`{"n":1}`, `{"n":2}`} {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if _, err := http.DefaultClient.Do(req); err != nil {
+			t.Fatalf("post: %v", err)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/logs/" + ch)
+	if err != nil {
+		t.Fatalf("get logs: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	var events []types.WebhookEvent
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("want 2 events, got %d", len(events))
+	}
+	if string(events[0].Body) != `{"n":1}` {
+		t.Errorf("first event body: got %q", events[0].Body)
+	}
+}
+
+func TestLogsHandlerEmptyChannel(t *testing.T) {
+	_, ts := newTestServer()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/logs/" + uuid.New())
+	if err != nil {
+		t.Fatalf("get logs: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+
+	raw, _ := io.ReadAll(resp.Body)
+	var events []types.WebhookEvent
+	if err := json.Unmarshal(raw, &events); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("want empty array, got %d events", len(events))
+	}
+}
+
+func TestLogsHandlerRejects400OnInvalidChannel(t *testing.T) {
+	_, ts := newTestServer()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/logs/not-a-uuid")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestLogsHandlerCapsAtTen(t *testing.T) {
+	_, ts := newTestServer()
+	defer ts.Close()
+
+	ch := uuid.New()
+	for i := 0; i < 15; i++ {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(`{}`))
+		http.DefaultClient.Do(req)
+	}
+
+	resp, _ := http.Get(ts.URL + "/logs/" + ch)
+	defer resp.Body.Close()
+
+	var events []types.WebhookEvent
+	json.NewDecoder(resp.Body).Decode(&events)
+	if len(events) != 10 {
+		t.Errorf("want 10, got %d", len(events))
 	}
 }

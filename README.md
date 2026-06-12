@@ -42,11 +42,14 @@ automatically with exponential backoff if the server drops.
 
 ### Server (`whim-server`)
 
-| Flag          | Default   | Description                               |
-|---------------|-----------|-------------------------------------------|
-| `--addr`      | `:9000`   | TCP listen address                        |
-| `--log-level` | `info`    | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `--json`      | `false`   | Emit logs as JSON (default: console)      |
+| Flag             | Default   | Description                                                   |
+|------------------|-----------|---------------------------------------------------------------|
+| `--addr`         | `:9000`   | TCP listen address                                            |
+| `--log-level`    | `info`    | Log verbosity: `debug`, `info`, `warn`, `error`               |
+| `--json`         | `false`   | Emit logs as JSON (default: console)                          |
+| `--backlog-size` | `10000`   | Max events kept globally in the in-memory store               |
+| `--redis-url`    |           | Redis URL (`redis://...`) — enables Redis store               |
+| `--redis-ttl`    | `24h`     | TTL applied to each Redis channel key after its last write    |
 
 ### Client (`whim-client`)
 
@@ -61,6 +64,38 @@ automatically with exponential backoff if the server drops.
 
 > **Channel names must be valid UUIDs.** The server rejects hook and subscribe
 > requests with a `400` if the channel is not a well-formed UUID v4.
+
+## API
+
+| Method | Path                   | Description                                      |
+|--------|------------------------|--------------------------------------------------|
+| `*`    | `/hook/{uuid}`         | Receive a webhook and broadcast it to subscribers |
+| `GET`  | `/subscribe/{uuid}`    | WebSocket — subscribe to a channel               |
+| `GET`  | `/logs/{uuid}`         | Return the last 10 events received on a channel  |
+
+The `/logs/{uuid}` response is a JSON array of `WebhookEvent` objects in
+chronological order (oldest first). Returns an empty array if no events have
+been received yet.
+
+```bash
+curl http://<public-host>:9000/logs/<channel-uuid>
+```
+
+### Event store
+
+By default events are kept in a global in-memory ring buffer (`--backlog-size`,
+default 10 000). When the buffer is full, the oldest event across all channels
+is silently evicted.
+
+For persistence across restarts, pass `--redis-url`:
+
+```bash
+./bin/whim-server --redis-url redis://localhost:6379 --redis-ttl 48h
+```
+
+With Redis, each channel is stored as a list keyed `whim:logs:{uuid}`. The
+`--backlog-size` cap applies per channel, and `--redis-ttl` resets on every
+new event so the key expires only after a period of inactivity.
 
 ## Logging
 
