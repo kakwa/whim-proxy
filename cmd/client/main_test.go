@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
 )
 
@@ -215,3 +217,137 @@ func TestConnectInvalidJSONContinues(t *testing.T) {
 		t.Fatal("connect did not return after server closed")
 	}
 }
+
+// --- buildLogger ---
+
+func TestBuildLoggerValidLevels(t *testing.T) {
+	for _, level := range []string{"debug", "info", "warn", "error"} {
+		if _, err := buildLogger(level, false); err != nil {
+			t.Errorf("level %q (console): %v", level, err)
+		}
+		if _, err := buildLogger(level, true); err != nil {
+			t.Errorf("level %q (json): %v", level, err)
+		}
+	}
+}
+
+func TestBuildLoggerInvalidLevel(t *testing.T) {
+	if _, err := buildLogger("invalid", false); err == nil {
+		t.Error("expected error for invalid level")
+	}
+}
+
+// --- connect: server returns HTTP error (resp != nil branch) ---
+
+func TestConnectDialErrorWithHTTPResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/"
+	err := connect(zap.NewNop(), wsURL, "http://localhost:9")
+	if err == nil {
+		t.Fatal("expected dial error")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 in error message, got: %v", err)
+	}
+}
+
+// --- fetchLogs ---
+
+func TestFetchLogsSuccess(t *testing.T) {
+	ch := uuid.New()
+	events := []types.WebhookEvent{
+		{ID: "1", Method: "POST", Path: "/hook/" + ch},
+	}
+	data, _ := json.Marshal(events)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
+	var out bytes.Buffer
+	if err := fetchLogs(ts.Client(), wsBase, ch, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"id": "1"`) {
+		t.Errorf("unexpected output: %s", out.String())
+	}
+}
+
+func TestFetchLogsWSSConversion(t *testing.T) {
+	// wss:// → https:// conversion; use a real TLS test server.
+	ch := uuid.New()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+	}))
+	defer ts.Close()
+
+	wssBase := "wss" + strings.TrimPrefix(ts.URL, "https")
+	var out bytes.Buffer
+	if err := fetchLogs(ts.Client(), wssBase, ch, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "[]") {
+		t.Errorf("unexpected output: %s", out.String())
+	}
+}
+
+func TestFetchLogsURLParseError(t *testing.T) {
+	var out bytes.Buffer
+	err := fetchLogs(http.DefaultClient, "::invalid-url", uuid.New(), &out)
+	if err == nil {
+		t.Error("expected error for invalid URL")
+	}
+}
+
+func TestFetchLogsHTTPError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	ts.Close() // shut down immediately so Get fails
+
+	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
+	var out bytes.Buffer
+	err := fetchLogs(http.DefaultClient, wsBase, uuid.New(), &out)
+	if err == nil {
+		t.Error("expected error for closed server")
+	}
+}
+
+func TestFetchLogsServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
+	var out bytes.Buffer
+	err := fetchLogs(ts.Client(), wsBase, uuid.New(), &out)
+	if err == nil {
+		t.Error("expected error for non-200 response")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("expected 403 in error, got: %v", err)
+	}
+}
+
+func TestFetchLogsDecodeError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not-json"))
+	}))
+	defer ts.Close()
+
+	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
+	var out bytes.Buffer
+	err := fetchLogs(ts.Client(), wsBase, uuid.New(), &out)
+	if err == nil {
+		t.Error("expected decode error")
+	}
+}
+

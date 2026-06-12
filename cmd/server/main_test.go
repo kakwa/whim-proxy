@@ -2,19 +2,55 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/store"
 	"github.com/whim-proxy/internal/types"
 	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
+
+// failWriter is an http.ResponseWriter whose Write always returns an error.
+type failWriter struct{ http.ResponseWriter }
+
+func (f *failWriter) Write([]byte) (int, error) { return 0, errors.New("write error") }
+
+// panicOnFatalLogger returns a logger that panics instead of calling os.Exit
+// on Fatal, so tests can catch the panic and verify the code path executed.
+func panicOnFatalLogger() *zap.Logger {
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.AddSync(io.Discard),
+		zapcore.FatalLevel,
+	)
+	return zap.New(core, zap.WithFatalHook(zapcore.WriteThenPanic))
+}
+
+// testStore is a configurable EventStore stub for error-path tests.
+type testStore struct {
+	pushErr    error
+	recentErr  error
+	recentData []types.WebhookEvent
+}
+
+func (s *testStore) Push(_ string, _ types.WebhookEvent) error {
+	return s.pushErr
+}
+
+func (s *testStore) Recent(_ string, _ int) ([]types.WebhookEvent, error) {
+	return s.recentData, s.recentErr
+}
 
 func newTestServer() (*server, *httptest.Server) {
 	srv := newServer(zap.NewNop(), store.NewMemory(100))
@@ -289,4 +325,174 @@ func TestLogsHandlerCapsAtTen(t *testing.T) {
 	if len(events) != 10 {
 		t.Errorf("want 10, got %d", len(events))
 	}
+}
+
+// --- buildLogger ---
+
+func TestBuildLoggerValidLevels(t *testing.T) {
+	for _, level := range []string{"debug", "info", "warn", "error"} {
+		if _, err := buildLogger(level, false); err != nil {
+			t.Errorf("level %q (console): %v", level, err)
+		}
+		if _, err := buildLogger(level, true); err != nil {
+			t.Errorf("level %q (json): %v", level, err)
+		}
+	}
+}
+
+func TestBuildLoggerInvalidLevel(t *testing.T) {
+	if _, err := buildLogger("invalid", false); err == nil {
+		t.Error("expected error for invalid level")
+	}
+}
+
+// --- statusResponseWriter.Hijack ---
+
+func TestHijackNotSupported(t *testing.T) {
+	w := &statusResponseWriter{ResponseWriter: httptest.NewRecorder()}
+	_, _, err := w.Hijack()
+	if err == nil {
+		t.Error("expected error when ResponseWriter does not implement Hijacker")
+	}
+}
+
+// --- hookHandler error paths (direct handler calls) ---
+
+func TestHookHandlerBodyReadError(t *testing.T) {
+	srv := newServer(zap.NewNop(), store.NewMemory(10))
+	ch := uuid.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/hook/"+ch, iotest.ErrReader(errors.New("read fail")))
+	req = mux.SetURLVars(req, map[string]string{"channel": ch})
+	w := httptest.NewRecorder()
+	srv.hookHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("want 500, got %d", w.Code)
+	}
+}
+
+func TestHookHandlerStorePushError(t *testing.T) {
+	srv := newServer(zap.NewNop(), &testStore{pushErr: errors.New("store down")})
+	ch := uuid.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/hook/"+ch, strings.NewReader(`{}`))
+	req = mux.SetURLVars(req, map[string]string{"channel": ch})
+	w := httptest.NewRecorder()
+	srv.hookHandler(w, req)
+
+	// Push error is logged but the response is still 200.
+	if w.Code != http.StatusOK {
+		t.Errorf("want 200, got %d", w.Code)
+	}
+}
+
+// --- logsHandler error paths (direct handler calls) ---
+
+func TestLogsHandlerStoreError(t *testing.T) {
+	srv := newServer(zap.NewNop(), &testStore{recentErr: errors.New("store down")})
+	ch := uuid.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs/"+ch, nil)
+	req = mux.SetURLVars(req, map[string]string{"channel": ch})
+	w := httptest.NewRecorder()
+	srv.logsHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("want 500, got %d", w.Code)
+	}
+}
+
+func TestLogsHandlerNilEvents(t *testing.T) {
+	// Store returns nil slice without error; handler must encode [] not null.
+	srv := newServer(zap.NewNop(), &testStore{recentData: nil, recentErr: nil})
+	ch := uuid.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs/"+ch, nil)
+	req = mux.SetURLVars(req, map[string]string{"channel": ch})
+	w := httptest.NewRecorder()
+	srv.logsHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
+	}
+	body := strings.TrimSpace(w.Body.String())
+	if body == "null" {
+		t.Error("response must be [] not null")
+	}
+}
+
+// --- hookHandler: json.Indent else branch (non-JSON body with subscriber) ---
+
+func TestHookHandlerPayloadInvalidJSON(t *testing.T) {
+	_, ts := newTestServer()
+	defer ts.Close()
+
+	ch := uuid.New()
+
+	// Connect a subscriber so n >= 1 during broadcast.
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/subscribe/" + ch
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	time.Sleep(20 * time.Millisecond)
+
+	// Post a non-JSON body; triggers the json.Indent else branch in hookHandler.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader("not-json"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("want 200, got %d", resp.StatusCode)
+	}
+}
+
+// --- initStore ---
+
+func TestInitStoreMemory(t *testing.T) {
+	s := initStore(zap.NewNop(), "", 0, 100)
+	if s == nil {
+		t.Fatal("expected non-nil store")
+	}
+	s.Push("a", types.WebhookEvent{ID: "1"})
+	got, _ := s.Recent("a", 10)
+	if len(got) != 1 {
+		t.Errorf("want 1, got %d", len(got))
+	}
+}
+
+func TestInitStoreRedis(t *testing.T) {
+	mr := miniredis.RunT(t)
+	s := initStore(zap.NewNop(), "redis://"+mr.Addr(), 0, 100)
+	if s == nil {
+		t.Fatal("expected non-nil store")
+	}
+	s.Push("a", types.WebhookEvent{ID: "1"})
+	got, _ := s.Recent("a", 10)
+	if len(got) != 1 {
+		t.Errorf("want 1, got %d", len(got))
+	}
+}
+
+func TestInitStoreRedisInitError(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic from logger.Fatal on redis init failure")
+		}
+	}()
+	initStore(panicOnFatalLogger(), "redis://127.0.0.1:1", 0, 100)
+}
+
+func TestLogsHandlerEncodeError(t *testing.T) {
+	srv := newServer(zap.NewNop(), store.NewMemory(10))
+	ch := uuid.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs/"+ch, nil)
+	req = mux.SetURLVars(req, map[string]string{"channel": ch})
+	srv.logsHandler(&failWriter{httptest.NewRecorder()}, req)
+	// No assertion — coverage verifies the error branch executes.
 }

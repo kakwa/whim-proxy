@@ -97,6 +97,43 @@ func connect(logger *zap.Logger, wsURL string, target string) error {
 	}
 }
 
+// fetchLogs retrieves the last events for channel from the server and writes
+// them as pretty-printed JSON to out. client is used for the HTTP request so
+// callers can inject test transports.
+func fetchLogs(client *http.Client, wsServer string, channel string, out io.Writer) error {
+	base, err := url.Parse(wsServer)
+	if err != nil {
+		return fmt.Errorf("parse server URL: %w", err)
+	}
+	switch base.Scheme {
+	case "ws":
+		base.Scheme = "http"
+	case "wss":
+		base.Scheme = "https"
+	}
+	base.Path = "/logs/" + channel
+
+	resp, err := client.Get(base.String())
+	if err != nil {
+		return fmt.Errorf("fetch logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("server error %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	var events []types.WebhookEvent
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		return fmt.Errorf("decode logs: %w", err)
+	}
+
+	data, _ := json.MarshalIndent(events, "", "  ")
+	fmt.Fprintln(out, string(data))
+	return nil
+}
+
 func buildLogger(levelStr string, jsonFormat bool) (*zap.Logger, error) {
 	var level zapcore.Level
 	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
@@ -113,12 +150,13 @@ func buildLogger(levelStr string, jsonFormat bool) (*zap.Logger, error) {
 }
 
 func main() {
-	server := flag.String("server", "ws://localhost:9000", "WebSocket server address")
+	server := flag.String("server", "", "WebSocket server address (required)")
 	channel := flag.String("channel", "", "channel name to subscribe to (required)")
 	target := flag.String("target", "http://localhost:8080", "local target to forward requests to")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	jsonLog := flag.Bool("json", false, "output logs in JSON format")
 	genUUID := flag.Bool("gen-uuid", false, "print a new UUID to stdout and exit")
+	logsFlag := flag.Bool("logs", false, "fetch and print the last received events for the channel, then exit")
 	flag.Parse()
 
 	if *genUUID {
@@ -133,11 +171,21 @@ func main() {
 	}
 	defer logger.Sync()
 
+	if *server == "" {
+		logger.Fatal("--server is required")
+	}
 	if *channel == "" {
 		logger.Fatal("--channel is required")
 	}
 	if !uuid.Valid(*channel) {
 		logger.Fatal("--channel must be a valid UUID")
+	}
+
+	if *logsFlag {
+		if err := fetchLogs(http.DefaultClient, *server, *channel, os.Stdout); err != nil {
+			logger.Fatal("fetch logs failed", zap.Error(err))
+		}
+		return
 	}
 
 	base, err := url.Parse(*server)

@@ -342,6 +342,19 @@ func buildLogger(levelStr string, jsonFormat bool) (*zap.Logger, error) {
 	return cfg.Build()
 }
 
+func initStore(logger *zap.Logger, redisURL string, redisTTL time.Duration, backlogSize int) store.EventStore {
+	if redisURL != "" {
+		rs, err := store.NewRedis(redisURL, redisTTL, backlogSize)
+		if err != nil {
+			logger.Fatal("redis init failed", zap.Error(err))
+		}
+		logger.Info("using Redis store", zap.String("url", redisURL), zap.Duration("ttl", redisTTL))
+		return rs
+	}
+	logger.Info("using in-memory store", zap.Int("backlog_size", backlogSize))
+	return store.NewMemory(backlogSize)
+}
+
 func main() {
 	addr := flag.String("addr", ":9000", "listen address")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
@@ -358,20 +371,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	var eventStore store.EventStore
-	if *redisURL != "" {
-		rs, err := store.NewRedis(*redisURL, *redisTTL, *backlogSize)
-		if err != nil {
-			logger.Fatal("redis init failed", zap.Error(err))
-		}
-		logger.Info("using Redis store", zap.String("url", *redisURL), zap.Duration("ttl", *redisTTL))
-		eventStore = rs
-	} else {
-		logger.Info("using in-memory store", zap.Int("backlog_size", *backlogSize))
-		eventStore = store.NewMemory(*backlogSize)
-	}
-
-	srv := newServer(logger, eventStore)
+	srv := newServer(logger, initStore(logger, *redisURL, *redisTTL, *backlogSize))
 	logger.Info("server listening", zap.String("addr", *addr))
 	if err := http.ListenAndServe(*addr, buildRouter(logger, srv)); err != nil {
 		logger.Fatal("server fatal", zap.Error(err))
