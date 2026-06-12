@@ -74,7 +74,8 @@ CHANNEL=$(./whim-client --gen-uuid)
 echo "$CHANNEL"
 
 <span class="comment"># 3. Start the client on your laptop</span>
-./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --target http://localhost:8080
+TARGET=http://localhost:8080/webhook
+./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --target "$TARGET"
 
 <span class="comment"># 4. Configure your webhook sender to POST to:</span>
 echo "http://{{.Host}}/hook/$CHANNEL"
