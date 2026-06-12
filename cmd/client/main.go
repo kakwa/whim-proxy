@@ -75,7 +75,12 @@ func connect(logger *zap.Logger, wsURL string, target string) error {
 		if resp != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
-			return fmt.Errorf("dial: %w (server returned HTTP %d: %s)", err, resp.StatusCode, strings.TrimSpace(string(body)))
+			reason := strings.TrimSpace(string(body))
+			logger.Error("server rejected connection",
+				zap.Int("status", resp.StatusCode),
+				zap.String("reason", reason),
+			)
+			return fmt.Errorf("dial: %w (HTTP %d: %s)", err, resp.StatusCode, reason)
 		}
 		return fmt.Errorf("dial: %w", err)
 	}
