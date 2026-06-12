@@ -22,14 +22,14 @@ make build
 # 1. Start the proxy server on a public host (listens on :9000 by default)
 ./bin/whim-server
 
-# 2. Start a client on your laptop — omit --channel to auto-generate a UUID
-./bin/whim-client --server ws://<public-host>:9000 --target http://localhost:8080
+# 2. Generate a channel UUID
+CHANNEL=$(./bin/whim-client --gen-uuid)
 
-# The client logs the channel UUID it is subscribed to, e.g.:
-#   INFO  generated channel UUID  {"channel": "4b1a2c3d-..."}
-#
-# 3. Configure your webhook sender to POST to that channel:
-curl -X POST http://<public-host>:9000/hook/4b1a2c3d-... \
+# 3. Start a client on your laptop
+./bin/whim-client --server ws://<public-host>:9000 --channel "$CHANNEL" --target http://localhost:8080
+
+# 4. Configure your webhook sender to POST to that channel:
+curl -X POST http://<public-host>:9000/hook/"$CHANNEL" \
      -H "Content-Type: application/json" \
      -d '{"event":"ping"}'
 ```
@@ -53,10 +53,11 @@ automatically with exponential backoff if the server drops.
 | Flag          | Default                 | Description                                      |
 |---------------|-------------------------|--------------------------------------------------|
 | `--server`    | `ws://localhost:9000`   | WebSocket server base URL                        |
-| `--channel`   | *(auto-generated UUID)* | Channel UUID to subscribe to                     |
+| `--channel`   | *(required)*            | Channel UUID to subscribe to                     |
 | `--target`    | `http://localhost:8080` | Local HTTP service to forward events to          |
 | `--log-level` | `info`                  | Log verbosity: `debug`, `info`, `warn`, `error`  |
 | `--json`      | `false`                 | Emit logs as JSON (default: console)             |
+| `--gen-uuid`  |                         | Print a new UUID to stdout and exit              |
 
 > **Channel names must be valid UUIDs.** The server rejects hook and subscribe
 > requests with a `400` if the channel is not a well-formed UUID v4.

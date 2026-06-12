@@ -118,7 +118,13 @@ func main() {
 	target := flag.String("target", "http://localhost:8080", "local target to forward requests to")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	jsonLog := flag.Bool("json", false, "output logs in JSON format")
+	genUUID := flag.Bool("gen-uuid", false, "print a new UUID to stdout and exit")
 	flag.Parse()
+
+	if *genUUID {
+		fmt.Println(uuid.New())
+		return
+	}
 
 	logger, err := buildLogger(*logLevel, *jsonLog)
 	if err != nil {
@@ -128,9 +134,9 @@ func main() {
 	defer logger.Sync()
 
 	if *channel == "" {
-		*channel = uuid.New()
-		logger.Info("generated channel UUID", zap.String("channel", *channel))
-	} else if !uuid.Valid(*channel) {
+		logger.Fatal("--channel is required")
+	}
+	if !uuid.Valid(*channel) {
 		logger.Fatal("--channel must be a valid UUID")
 	}
 
