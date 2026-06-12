@@ -3,10 +3,13 @@
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
-A lightweight webhook proxy with a publish/subscribe architecture. Send webhooks
-to the **server**; one or more **clients** receive and replay them against a
-local HTTP target. Ideal for exposing a local service to external webhook
-senders without a full tunnel.
+Whim-proxy (WebHook In the Middle Proxy) is a lightweight webhook proxy server+client combo designed to help developper test their local webhook consumer development against the real thing when instanciating the webhook producer locally is not an option.
+
+It works by having a public/reachable webhook listener (`whim-server`) receiving the events.
+
+Each event is then forwarded to subscribed `whim-client` running on developper laptops using websocket reverse tunnels.
+
+Finally the `whim-client` takes the event, and reproduces the query onto the local webhook consumer being developped.
 
 ## Quick start
 
