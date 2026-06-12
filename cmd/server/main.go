@@ -37,12 +37,17 @@ type subscriber struct {
 type channel struct {
 	mu          sync.Mutex
 	subscribers map[*subscriber]struct{}
+	maxSubs     int // 0 = unlimited
 }
 
-func (c *channel) add(s *subscriber) {
+func (c *channel) add(s *subscriber) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.maxSubs > 0 && len(c.subscribers) >= c.maxSubs {
+		return fmt.Errorf("subscriber limit of %d reached", c.maxSubs)
+	}
 	c.subscribers[s] = struct{}{}
+	return nil
 }
 
 func (c *channel) remove(s *subscriber) {
@@ -70,25 +75,43 @@ func (c *channel) count() int {
 	return len(c.subscribers)
 }
 
+func (c *channel) isFull() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.maxSubs > 0 && len(c.subscribers) >= c.maxSubs
+}
+
 // hub manages all named channels.
 type hub struct {
-	mu       sync.Mutex
-	channels map[string]*channel
+	mu          sync.Mutex
+	channels    map[string]*channel
+	maxChannels int // 0 = unlimited
+	maxSubs     int // passed to each new channel
 }
 
-func newHub() *hub {
-	return &hub{channels: make(map[string]*channel)}
+func newHub(maxChannels, maxSubs int) *hub {
+	return &hub{
+		channels:    make(map[string]*channel),
+		maxChannels: maxChannels,
+		maxSubs:     maxSubs,
+	}
 }
 
-func (h *hub) getOrCreate(name string) *channel {
+func (h *hub) getOrCreate(name string) (*channel, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	ch, ok := h.channels[name]
 	if !ok {
-		ch = &channel{subscribers: make(map[*subscriber]struct{})}
+		if h.maxChannels > 0 && len(h.channels) >= h.maxChannels {
+			return nil, fmt.Errorf("channel limit of %d reached", h.maxChannels)
+		}
+		ch = &channel{
+			subscribers: make(map[*subscriber]struct{}),
+			maxSubs:     h.maxSubs,
+		}
 		h.channels[name] = ch
 	}
-	return ch
+	return ch, nil
 }
 
 // statusResponseWriter captures the HTTP status code for logging.
@@ -134,9 +157,9 @@ type server struct {
 	eventStore store.EventStore
 }
 
-func newServer(logger *zap.Logger, eventStore store.EventStore) *server {
+func newServer(logger *zap.Logger, eventStore store.EventStore, maxChannels, maxSubs int) *server {
 	return &server{
-		hub:        newHub(),
+		hub:        newHub(maxChannels, maxSubs),
 		logger:     logger,
 		eventStore: eventStore,
 		upgrader: websocket.Upgrader{
@@ -188,7 +211,12 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch := s.hub.getOrCreate(channelName)
+	ch, err := s.hub.getOrCreate(channelName)
+	if err != nil {
+		s.logger.Warn("webhook channel limit", zap.String("channel", channelName), zap.Error(err))
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	n := ch.broadcast(data)
 
 	if err := s.eventStore.Push(channelName, event); err != nil {
@@ -230,6 +258,18 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch, err := s.hub.getOrCreate(channelName)
+	if err != nil {
+		s.logger.Warn("subscribe channel limit", zap.String("channel", channelName), zap.Error(err))
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if ch.isFull() {
+		s.logger.Warn("subscribe subscriber limit", zap.String("channel", channelName))
+		http.Error(w, "subscriber limit reached", http.StatusServiceUnavailable)
+		return
+	}
+
 	s.logger.Info("ws upgrade request", zap.String("channel", channelName), zap.String("remote", r.RemoteAddr))
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -243,8 +283,14 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 		send: make(chan []byte, 64),
 	}
 
-	ch := s.hub.getOrCreate(channelName)
-	ch.add(sub)
+	if err := ch.add(sub); err != nil {
+		// Channel filled between the pre-check and the upgrade.
+		s.logger.Warn("ws subscriber limit after upgrade", zap.String("channel", channelName), zap.Error(err))
+		conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "subscriber limit reached"))
+		conn.Close()
+		return
+	}
 	s.logger.Info("ws subscriber connected",
 		zap.String("channel", channelName),
 		zap.String("remote", r.RemoteAddr),
@@ -365,6 +411,8 @@ func main() {
 	backlogSize := flag.Int("backlog-size", 10000, "max events kept in the in-memory store (global across all channels)")
 	redisURL := flag.String("redis-url", "", "Redis URL (redis://...) — enables Redis store instead of in-memory")
 	redisTTL := flag.Duration("redis-ttl", 24*time.Hour, "TTL applied to each Redis channel key after its last write (0 = no expiry)")
+	maxChannels := flag.Int("max-channels", 100000, "max number of distinct channels tracked (0 = unlimited)")
+	maxClients := flag.Int("max-clients", 100, "max WebSocket subscribers per channel (0 = unlimited)")
 	flag.Parse()
 
 	logger, err := buildLogger(*logLevel, *jsonLog)
@@ -374,7 +422,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	srv := newServer(logger, initStore(logger, *redisURL, *redisTTL, *backlogSize))
+	srv := newServer(logger, initStore(logger, *redisURL, *redisTTL, *backlogSize), *maxChannels, *maxClients)
 	logger.Info("server listening", zap.String("addr", *addr))
 	if err := http.ListenAndServe(*addr, buildRouter(logger, srv)); err != nil {
 		logger.Fatal("server fatal", zap.Error(err))

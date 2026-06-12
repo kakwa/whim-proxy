@@ -53,20 +53,61 @@ func (s *testStore) Recent(_ string, _ int) ([]types.WebhookEvent, error) {
 }
 
 func newTestServer() (*server, *httptest.Server) {
-	srv := newServer(zap.NewNop(), store.NewMemory(100))
+	srv := newServer(zap.NewNop(), store.NewMemory(100), 100000, 100)
 	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
 	return srv, ts
 }
 
 func TestHubGetOrCreate(t *testing.T) {
-	h := newHub()
-	ch1 := h.getOrCreate("foo")
-	ch2 := h.getOrCreate("foo")
+	h := newHub(0, 0)
+	ch1, err := h.getOrCreate("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch2, _ := h.getOrCreate("foo")
 	if ch1 != ch2 {
 		t.Fatal("same name must return same channel")
 	}
-	if h.getOrCreate("bar") == ch1 {
+	bar, _ := h.getOrCreate("bar")
+	if bar == ch1 {
 		t.Fatal("different names must return different channels")
+	}
+}
+
+func TestHubMaxChannels(t *testing.T) {
+	h := newHub(2, 0)
+	if _, err := h.getOrCreate("a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.getOrCreate("b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.getOrCreate("c"); err == nil {
+		t.Error("expected error when channel limit is reached")
+	}
+	// Existing channels must still be accessible.
+	if _, err := h.getOrCreate("a"); err != nil {
+		t.Errorf("existing channel rejected: %v", err)
+	}
+}
+
+func TestChannelMaxSubscribers(t *testing.T) {
+	ch := &channel{subscribers: make(map[*subscriber]struct{}), maxSubs: 2}
+	s1 := &subscriber{send: make(chan []byte, 1)}
+	s2 := &subscriber{send: make(chan []byte, 1)}
+	s3 := &subscriber{send: make(chan []byte, 1)}
+
+	if err := ch.add(s1); err != nil {
+		t.Fatal(err)
+	}
+	if err := ch.add(s2); err != nil {
+		t.Fatal(err)
+	}
+	if err := ch.add(s3); err == nil {
+		t.Error("expected error when subscriber limit is reached")
+	}
+	if ch.count() != 2 {
+		t.Errorf("want 2 subscribers, got %d", ch.count())
 	}
 }
 
@@ -74,7 +115,9 @@ func TestChannelAddRemoveCount(t *testing.T) {
 	ch := &channel{subscribers: make(map[*subscriber]struct{})}
 	s := &subscriber{send: make(chan []byte, 4)}
 
-	ch.add(s)
+	if err := ch.add(s); err != nil {
+		t.Fatal(err)
+	}
 	if got := ch.count(); got != 1 {
 		t.Fatalf("count after add: got %d, want 1", got)
 	}
@@ -88,8 +131,12 @@ func TestChannelBroadcast(t *testing.T) {
 	ch := &channel{subscribers: make(map[*subscriber]struct{})}
 	s1 := &subscriber{send: make(chan []byte, 4)}
 	s2 := &subscriber{send: make(chan []byte, 4)}
-	ch.add(s1)
-	ch.add(s2)
+	if err := ch.add(s1); err != nil {
+		t.Fatal(err)
+	}
+	if err := ch.add(s2); err != nil {
+		t.Fatal(err)
+	}
 
 	n := ch.broadcast([]byte("hello"))
 	if n != 2 {
@@ -110,7 +157,9 @@ func TestChannelBroadcast(t *testing.T) {
 func TestChannelBroadcastDropsSlowSubscriber(t *testing.T) {
 	ch := &channel{subscribers: make(map[*subscriber]struct{})}
 	// unbuffered — always full, should be dropped without blocking
-	ch.add(&subscriber{send: make(chan []byte, 0)})
+	if err := ch.add(&subscriber{send: make(chan []byte, 0)}); err != nil {
+		t.Fatal(err)
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -362,7 +411,7 @@ func TestHijackNotSupported(t *testing.T) {
 // --- hookHandler error paths (direct handler calls) ---
 
 func TestHookHandlerBodyReadError(t *testing.T) {
-	srv := newServer(zap.NewNop(), store.NewMemory(10))
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 100000, 100)
 	ch := uuid.New()
 
 	req := httptest.NewRequest(http.MethodPost, "/hook/"+ch, iotest.ErrReader(errors.New("read fail")))
@@ -376,7 +425,7 @@ func TestHookHandlerBodyReadError(t *testing.T) {
 }
 
 func TestHookHandlerStorePushError(t *testing.T) {
-	srv := newServer(zap.NewNop(), &testStore{pushErr: errors.New("store down")})
+	srv := newServer(zap.NewNop(), &testStore{pushErr: errors.New("store down")}, 100000, 100)
 	ch := uuid.New()
 
 	req := httptest.NewRequest(http.MethodPost, "/hook/"+ch, strings.NewReader(`{}`))
@@ -393,7 +442,7 @@ func TestHookHandlerStorePushError(t *testing.T) {
 // --- logsHandler error paths (direct handler calls) ---
 
 func TestLogsHandlerStoreError(t *testing.T) {
-	srv := newServer(zap.NewNop(), &testStore{recentErr: errors.New("store down")})
+	srv := newServer(zap.NewNop(), &testStore{recentErr: errors.New("store down")}, 100000, 100)
 	ch := uuid.New()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs/"+ch, nil)
@@ -408,7 +457,7 @@ func TestLogsHandlerStoreError(t *testing.T) {
 
 func TestLogsHandlerNilEvents(t *testing.T) {
 	// Store returns nil slice without error; handler must encode [] not null.
-	srv := newServer(zap.NewNop(), &testStore{recentData: nil, recentErr: nil})
+	srv := newServer(zap.NewNop(), &testStore{recentData: nil, recentErr: nil}, 100000, 100)
 	ch := uuid.New()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs/"+ch, nil)
@@ -491,11 +540,64 @@ func TestInitStoreRedisInitError(t *testing.T) {
 }
 
 func TestLogsHandlerEncodeError(t *testing.T) {
-	srv := newServer(zap.NewNop(), store.NewMemory(10))
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 100000, 100)
 	ch := uuid.New()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs/"+ch, nil)
 	req = mux.SetURLVars(req, map[string]string{"channel": ch})
 	srv.logsHandler(&failWriter{httptest.NewRecorder()}, req)
 	// No assertion — coverage verifies the error branch executes.
+}
+
+// --- limit enforcement via HTTP ---
+
+func TestHookHandlerChannelLimitReturns503(t *testing.T) {
+	// Hub capped at 1 channel.
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 1, 100)
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	post := func(ch string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(`{}`))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := post(uuid.New()); code != http.StatusOK {
+		t.Fatalf("first channel: got %d, want 200", code)
+	}
+	if code := post(uuid.New()); code != http.StatusServiceUnavailable {
+		t.Errorf("second channel: got %d, want 503", code)
+	}
+}
+
+func TestSubscribeHandlerSubscriberLimitReturns503(t *testing.T) {
+	// Channel capped at 1 subscriber.
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 100000, 1)
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	ch := uuid.New()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/subscribe/" + ch
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("first subscriber dial: %v", err)
+	}
+	defer conn.Close()
+	time.Sleep(20 * time.Millisecond)
+
+	// Second subscriber should be rejected before upgrade (503).
+	resp, err := http.Get(ts.URL + "/subscribe/" + ch)
+	if err != nil {
+		t.Fatalf("second subscribe request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("second subscriber: got %d, want 503", resp.StatusCode)
+	}
 }
