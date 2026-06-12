@@ -50,8 +50,9 @@ automatically with exponential backoff if the server drops.
 | `--backlog-size` | `10000`   | Max events kept globally in the in-memory store               |
 | `--redis-url`    |           | Redis URL (`redis://...`) — enables Redis store               |
 | `--redis-ttl`    | `24h`     | TTL applied to each Redis channel key after its last write    |
-| `--max-channels` | `100000`  | Max distinct channels tracked (0 = unlimited)                 |
-| `--max-clients`  | `100`     | Max WebSocket subscribers per channel (0 = unlimited)         |
+| `--max-channels`      | `100000` | Max distinct channels tracked (0 = unlimited)                |
+| `--max-clients`       | `100`    | Max WebSocket subscribers per channel (0 = unlimited)        |
+| `--max-clients-per-ip`| `1000`   | Max WebSocket subscribers per source IP (0 = unlimited)      |
 
 ### Client (`whim-client`)
 
