@@ -80,11 +80,8 @@ TARGET=http://localhost:8080/webhook
 <span class="comment"># 4. Configure your webhook sender to POST to:</span>
 echo "http://{{.Host}}/hook/$CHANNEL"
 
-<span class="comment"># 5. Check received events via the client:</span>
-./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --logs
-
-<span class="comment"># Or directly with curl:</span>
-curl "http://{{.Host}}/logs/$CHANNEL"</pre>
+<span class="comment"># 5. Check received events:</span>
+./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --logs</pre>
 </section>
 
 <section>
