@@ -73,6 +73,9 @@ func TestReplayForwardsRequest(t *testing.T) {
 	if cap.headers.Get("Content-Type") != "application/json" {
 		t.Errorf("Content-Type: got %q", cap.headers.Get("Content-Type"))
 	}
+	if cap.headers.Get("X-Whim-Proxy-Client") != version {
+		t.Errorf("X-Whim-Proxy-Client: got %q, want %q", cap.headers.Get("X-Whim-Proxy-Client"), version)
+	}
 	if string(cap.body) != `{"action":"opened"}` {
 		t.Errorf("body: got %q", cap.body)
 	}

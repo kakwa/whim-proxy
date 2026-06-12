@@ -3,13 +3,15 @@
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
-Whim-proxy (WebHook In the Middle Proxy) is a lightweight webhook proxy server+client combo designed to help developers test their local webhook consumer development against the real thing when instantiating the webhook producer locally is not an option.
+Whim-proxy (WebHook In the Middle Proxy) is a lightweight webhook proxy designed to help developers test webhook consumer development.
 
-It works by having a public/reachable webhook listener (`whim-server`) receiving the events.
+Frequently, webhook event senders cannot be integrated with a private/NATed developper laptop, either because it's too complex, or part of a third-party service like GitHub or Stripe.
 
-Each event is then forwarded to subscribed `whim-client` running on developer laptops using websocket reverse tunnels.
+Whim-proxy solves this issue with a `whim-server` & `whim-client` working as follows:
 
-Finally the `whim-client` takes the event, and reproduces the query onto the local webhook consumer being developed.
+1. a public/reachable webhook listener (`whim-server`) receiving the events.
+2. Each event is then forwarded to subscribed `whim-client` running on developer laptops using websocket reverse tunnels.
+3. Finally the `whim-client` takes the event, and reproduces the original webhook, targetting the local consumer instance being developped.
 
 ## Quick start
 

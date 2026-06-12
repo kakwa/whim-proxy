@@ -2,17 +2,24 @@ BIN_DIR := bin
 SERVER  := $(BIN_DIR)/whim-server
 CLIENT  := $(BIN_DIR)/whim-client
 
-.PHONY: all build server client run-server run-client clean test coverage vet fmt
+VERSION ?= 0.0.1
+GIT_VERSION := $(shell git -C . describe --tags --always --dirty 2>/dev/null)
+ifneq ($(GIT_VERSION),)
+  VERSION := $(GIT_VERSION)
+endif
+LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+
+.PHONY: all build server client run-server run-client clean test coverage vet fmt tag
 
 all: build
 
 build: server client
 
 server:
-	go build -o $(SERVER) ./cmd/server
+	go build $(LDFLAGS) -o $(SERVER) ./cmd/server
 
 client:
-	go build -o $(CLIENT) ./cmd/client
+	go build $(LDFLAGS) -o $(CLIENT) ./cmd/client
 
 run-server:
 	go run ./cmd/server --addr :9000
@@ -37,3 +44,6 @@ fmt:
 
 clean:
 	rm -rf $(BIN_DIR)
+
+tag:
+	git tag -a $(VERSION) -m "release $(VERSION)"

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
 )
 
@@ -84,7 +85,8 @@ func TestHookHandlerReturns200(t *testing.T) {
 	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/ci", strings.NewReader(`{"x":1}`))
+	ch := uuid.New()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(`{"x":1}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -94,6 +96,40 @@ func TestHookHandlerReturns200(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", resp.StatusCode)
 	}
+	if got := resp.Header.Get("X-Whim-Proxy-Server"); got != version {
+		t.Errorf("X-Whim-Proxy-Server: got %q, want %q", got, version)
+	}
+}
+
+func TestHookHandlerRejects400OnInvalidChannel(t *testing.T) {
+	srv := newServer(zap.NewNop())
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/not-a-uuid", strings.NewReader(`{}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestSubscribeHandlerRejects400OnInvalidChannel(t *testing.T) {
+	srv := newServer(zap.NewNop())
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/subscribe/not-a-uuid")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
 }
 
 func TestSubscribeHandlerUpgradeError(t *testing.T) {
@@ -102,7 +138,7 @@ func TestSubscribeHandlerUpgradeError(t *testing.T) {
 	defer ts.Close()
 
 	// Plain HTTP GET (no WS upgrade headers) — upgrader writes 400 and returns.
-	resp, err := http.Get(ts.URL + "/subscribe/testchan")
+	resp, err := http.Get(ts.URL + "/subscribe/" + uuid.New())
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -117,7 +153,8 @@ func TestWebSocketReceivesWebhookEvent(t *testing.T) {
 	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
 	defer ts.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/subscribe/ci"
+	ch := uuid.New()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/subscribe/" + ch
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -127,7 +164,7 @@ func TestWebSocketReceivesWebhookEvent(t *testing.T) {
 	time.Sleep(20 * time.Millisecond) // let subscription register
 
 	body := `{"ref":"refs/heads/main"}`
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/ci", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "push")
 	if _, err := http.DefaultClient.Do(req); err != nil {

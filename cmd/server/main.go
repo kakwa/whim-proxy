@@ -18,9 +18,12 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+var version = "dev"
 
 // subscriber wraps a single WebSocket connection for a channel.
 type subscriber struct {
@@ -152,6 +155,11 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	channelName := vars["channel"]
 
+	if !uuid.Valid(channelName) {
+		http.Error(w, "channel must be a valid UUID", http.StatusBadRequest)
+		return
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		s.logger.Error("webhook body read error", zap.Error(err))
@@ -197,6 +205,7 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.Header().Set("X-Whim-Proxy-Server", version)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
 }
@@ -206,6 +215,11 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	channelName := vars["channel"]
+
+	if !uuid.Valid(channelName) {
+		http.Error(w, "channel must be a valid UUID", http.StatusBadRequest)
+		return
+	}
 
 	s.logger.Info("ws upgrade request", zap.String("channel", channelName), zap.String("remote", r.RemoteAddr))
 

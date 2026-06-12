@@ -14,9 +14,12 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+var version = "dev"
 
 const (
 	initialBackoff = 1 * time.Second
@@ -42,6 +45,7 @@ func replay(logger *zap.Logger, event types.WebhookEvent, target string) {
 			req.Header.Add(key, v)
 		}
 	}
+	req.Header.Set("X-Whim-Proxy-Client", version)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -124,7 +128,10 @@ func main() {
 	defer logger.Sync()
 
 	if *channel == "" {
-		logger.Fatal("--channel is required")
+		*channel = uuid.New()
+		logger.Info("generated channel UUID", zap.String("channel", *channel))
+	} else if !uuid.Valid(*channel) {
+		logger.Fatal("--channel must be a valid UUID")
 	}
 
 	base, err := url.Parse(*server)
