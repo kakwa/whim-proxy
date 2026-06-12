@@ -67,17 +67,19 @@
 
 <section>
   <h2>Quick start</h2>
-  <pre><span class="comment"># 1. Generate a channel UUID</span>
+  <pre><span class="comment"># 1. Download client (see below)</span>
+
+<span class="comment"># 2. Generate a channel UUID</span>
 CHANNEL=$(./whim-client --gen-uuid)
 echo "$CHANNEL"
 
-<span class="comment"># 2. Start the client on your laptop</span>
+<span class="comment"># 3. Start the client on your laptop</span>
 ./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --target http://localhost:8080
 
-<span class="comment"># 3. Configure your webhook sender to POST to:</span>
+<span class="comment"># 4. Configure your webhook sender to POST to:</span>
 echo "http://{{.Host}}/hook/$CHANNEL"
 
-<span class="comment"># 4. Check received events:</span>
+<span class="comment"># 5. Check received events:</span>
 echo "http://{{.Host}}/logs/$CHANNEL"</pre>
 </section>
 
