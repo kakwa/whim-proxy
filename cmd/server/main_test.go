@@ -95,6 +95,22 @@ func TestHookHandlerReturns200(t *testing.T) {
 	}
 }
 
+func TestSubscribeHandlerUpgradeError(t *testing.T) {
+	srv := newServer()
+	ts := httptest.NewServer(buildRouter(srv))
+	defer ts.Close()
+
+	// Plain HTTP GET (no WS upgrade headers) — upgrader writes 400 and returns.
+	resp, err := http.Get(ts.URL + "/subscribe/testchan")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 from failed upgrade, got %d", resp.StatusCode)
+	}
+}
+
 func TestWebSocketReceivesWebhookEvent(t *testing.T) {
 	srv := newServer()
 	ts := httptest.NewServer(buildRouter(srv))
