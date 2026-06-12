@@ -103,7 +103,7 @@ func (h *hub) getOrCreate(name string) (*channel, error) {
 	ch, ok := h.channels[name]
 	if !ok {
 		if h.maxChannels > 0 && len(h.channels) >= h.maxChannels {
-			return nil, fmt.Errorf("channel limit of %d reached", h.maxChannels)
+			return nil, fmt.Errorf("service at capacity, channel creation temporarily disabled")
 		}
 		ch = &channel{
 			subscribers: make(map[*subscriber]struct{}),
