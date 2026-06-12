@@ -2,7 +2,7 @@ BIN_DIR := bin
 SERVER  := $(BIN_DIR)/whim-server
 CLIENT  := $(BIN_DIR)/whim-client
 
-.PHONY: all build server client run-server run-client clean test vet fmt
+.PHONY: all build server client run-server run-client clean test coverage vet fmt
 
 all: build
 
@@ -21,7 +21,11 @@ run-client:
 	go run ./cmd/client --server ws://localhost:9000 --channel myapp --target http://localhost:8080
 
 test:
-	go test ./...
+	go test -race ./...
+
+coverage:
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	go tool cover -func=coverage.out
 
 vet:
 	go vet ./...

@@ -188,12 +188,7 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[ws] subscriber disconnected channel=%s total=%d", channelName, ch.count())
 }
 
-func main() {
-	addr := flag.String("addr", ":9000", "listen address")
-	flag.Parse()
-
-	srv := newServer()
-
+func buildRouter(srv *server) http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/hook/{channel}", srv.hookHandler).Methods(
 		http.MethodGet,
@@ -204,9 +199,16 @@ func main() {
 		http.MethodOptions,
 	)
 	r.HandleFunc("/subscribe/{channel}", srv.subscribeHandler)
+	return r
+}
 
+func main() {
+	addr := flag.String("addr", ":9000", "listen address")
+	flag.Parse()
+
+	srv := newServer()
 	log.Printf("[server] listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, r); err != nil {
+	if err := http.ListenAndServe(*addr, buildRouter(srv)); err != nil {
 		log.Fatalf("[server] fatal: %v", err)
 	}
 }
