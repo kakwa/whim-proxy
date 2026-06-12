@@ -20,6 +20,7 @@ import (
 	"github.com/whim-proxy/internal/store"
 	"github.com/whim-proxy/internal/types"
 	"github.com/whim-proxy/internal/uuid"
+	"github.com/whim-proxy/internal/web"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -314,6 +315,7 @@ func (s *server) logsHandler(w http.ResponseWriter, r *http.Request) {
 
 func buildRouter(logger *zap.Logger, srv *server) http.Handler {
 	r := mux.NewRouter()
+	web.RegisterHandlers(r, version)
 	r.HandleFunc("/hook/{channel}", srv.hookHandler).Methods(
 		http.MethodGet,
 		http.MethodPost,

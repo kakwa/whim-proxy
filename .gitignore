@@ -1,3 +1,6 @@
 bin/
 coverage.out
 coverage.html
+
+# Cross-compiled client binaries embedded in the server (built by 'make build')
+internal/web/clients/whim-client-*

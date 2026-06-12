@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>whim-proxy</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #fff;
+      color: #1a1a1a;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+      line-height: 1.65;
+    }
+    header { text-align: center; padding: 2.5rem 0 2rem; }
+    header img { max-width: 320px; width: 100%; }
+    h1 { font-size: 2.1rem; font-weight: 700; margin: .9rem 0 .3rem; letter-spacing: -.5px; }
+    .tagline { color: #555; font-size: 1.05rem; }
+    .version { font-size: .82rem; color: #999; margin-top: .4rem; font-family: monospace; }
+    h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 2.2rem 0 .8rem;
+      padding-bottom: .35rem;
+      border-bottom: 1px solid #ebebeb;
+    }
+    pre {
+      background: #f6f8fa;
+      border: 1px solid #e0e4e8;
+      border-radius: 6px;
+      padding: 1.1rem 1.3rem;
+      overflow-x: auto;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: .875rem;
+      line-height: 1.6;
+      color: #1a1a1a;
+    }
+    pre .comment { color: #6e7781; }
+    table { border-collapse: collapse; width: 100%; margin-top: .5rem; font-size: .9rem; }
+    th, td { border: 1px solid #e0e4e8; padding: .5rem .85rem; text-align: left; }
+    th { background: #f6f8fa; font-weight: 600; }
+    tr:hover td { background: #fafafa; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      background: #f0f2f4;
+      padding: .1em .4em;
+      border-radius: 4px;
+      font-size: .86em;
+      font-family: monospace;
+    }
+    .note { color: #555; font-size: .9rem; margin-top: .6rem; }
+    .badge { display: inline-block; padding: .15em .45em; border-radius: 3px; font-size: .78em; font-weight: 600; font-family: monospace; vertical-align: middle; }
+    .method-any  { background: #dbeafe; color: #1e40af; }
+    .method-get  { background: #dcfce7; color: #166534; }
+    .method-ws   { background: #fef9c3; color: #854d0e; }
+  </style>
+</head>
+<body>
+
+<header>
+  <img src="/favicon.svg" alt="whim-proxy logo">
+  <h1>whim-proxy</h1>
+  <p class="tagline">WebHook In the Middle Proxy &mdash; route external webhooks to your local dev machine.</p>
+  <p class="version">version: {{.Version}}</p>
+</header>
+
+<section>
+  <h2>Quick start</h2>
+  <pre><span class="comment"># 1. Generate a channel UUID</span>
+CHANNEL=$(./whim-client --gen-uuid)
+
+<span class="comment"># 2. Start the client on your laptop</span>
+./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --target http://localhost:8080
+
+<span class="comment"># 3. Configure your webhook sender to POST to:</span>
+<span class="comment">#    http://{{.Host}}/hook/$CHANNEL</span>
+
+<span class="comment"># 4. Check received events:</span>
+<span class="comment">#    http://{{.Host}}/logs/$CHANNEL</span></pre>
+</section>
+
+<section>
+  <h2>Download client</h2>
+  {{if .Clients}}
+  <table>
+    <tr><th>Platform</th><th>Binary</th></tr>
+    {{range .Clients}}
+    <tr>
+      <td>{{.Display}}</td>
+      <td><a href="{{.URL}}">{{.Name}}</a></td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="note">
+    Client binaries are not bundled in this build.<br>
+    Run <code>make build</code> to embed them, or download from
+    <a href="https://github.com/kakwa/whim-proxy/releases">GitHub Releases</a>.
+  </p>
+  {{end}}
+</section>
+
+<section>
+  <h2>API</h2>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+    <tr>
+      <td><span class="badge method-any">*</span></td>
+      <td><code>/hook/{uuid}</code></td>
+      <td>Receive a webhook and broadcast it to all subscribers on the channel</td>
+    </tr>
+    <tr>
+      <td><span class="badge method-ws">WS</span></td>
+      <td><code>/subscribe/{uuid}</code></td>
+      <td>Subscribe to a channel — events are streamed as JSON over WebSocket</td>
+    </tr>
+    <tr>
+      <td><span class="badge method-get">GET</span></td>
+      <td><code>/logs/{uuid}</code></td>
+      <td>Return the last 10 events received on a channel (JSON array)</td>
+    </tr>
+    <tr>
+      <td><span class="badge method-get">GET</span></td>
+      <td><code>/clients/{file}</code></td>
+      <td>Download a pre-built client binary</td>
+    </tr>
+  </table>
+  <p class="note">Channel names must be valid UUIDs. Use <code>--gen-uuid</code> to generate one.</p>
+</section>
+
+</body>
+</html>

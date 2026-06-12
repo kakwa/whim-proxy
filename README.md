@@ -1,5 +1,9 @@
 # whim-proxy
 
+<p align="center">
+  <img src="logo.svg" alt="whim-proxy" width="420">
+</p>
+
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
@@ -190,11 +194,21 @@ sequenceDiagram
 ## Building
 
 ```bash
-make build     # compile both binaries to bin/
+make build     # cross-compile client for all platforms, embed in server, build local client
 make test      # run tests with race detector
 make coverage  # generate coverage.html
-make clean     # remove bin/
+make clean     # remove bin/ and embedded client binaries
 ```
+
+`make build` cross-compiles `whim-client` for Linux, macOS, and Windows (both
+`amd64` and `arm64`), places the binaries in `internal/web/clients/`, then
+compiles the server — which embeds them via `//go:embed`. The running server
+serves them for download at `/clients/{filename}` and lists them on the home
+page (`/`).
+
+Running `go build ./cmd/server` directly (without `make`) produces a valid
+server binary that works fully, but without the embedded client binaries —
+the home page will show a link to GitHub Releases instead.
 
 The version string is embedded at build time from the nearest git tag
 (`git describe --tags --always --dirty`) and surfaced in the
