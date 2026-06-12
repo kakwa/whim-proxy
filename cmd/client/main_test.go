@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"go.uber.org/zap"
 )
 
 // capture holds the last request seen by the test server.
@@ -52,7 +53,7 @@ func TestReplayForwardsRequest(t *testing.T) {
 		Body: []byte(`{"action":"opened"}`),
 	}
 
-	replay(event, ts.URL)
+	replay(zap.NewNop(), event, ts.URL)
 
 	cap.mu.Lock()
 	defer cap.mu.Unlock()
@@ -88,7 +89,7 @@ func TestReplayNoQueryString(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	replay(types.WebhookEvent{
+	replay(zap.NewNop(), types.WebhookEvent{
 		ID:     "test02",
 		Method: http.MethodPost,
 		Path:   "/ping",
@@ -107,7 +108,7 @@ func TestReplayNoQueryString(t *testing.T) {
 func TestReplayInvalidMethodIsHandled(t *testing.T) {
 	// A method containing a newline is rejected by http.NewRequest —
 	// replay must log and return without panicking.
-	replay(types.WebhookEvent{
+	replay(zap.NewNop(), types.WebhookEvent{
 		ID:     "err01",
 		Method: "INVALID\nMETHOD",
 		Path:   "/foo",
@@ -116,7 +117,7 @@ func TestReplayInvalidMethodIsHandled(t *testing.T) {
 
 func TestReplayTargetDownIsHandled(t *testing.T) {
 	// Nothing is listening on port 9 — replay must log and return.
-	replay(types.WebhookEvent{
+	replay(zap.NewNop(), types.WebhookEvent{
 		ID:     "err02",
 		Method: http.MethodPost,
 		Path:   "/foo",
@@ -143,7 +144,7 @@ func newWSServer(t *testing.T, fn func(*websocket.Conn)) (string, func()) {
 }
 
 func TestConnectDialError(t *testing.T) {
-	err := connect("ws://localhost:9", "http://localhost:9")
+	err := connect(zap.NewNop(), "ws://localhost:9", "http://localhost:9")
 	if err == nil {
 		t.Fatal("expected error dialing closed port")
 	}
@@ -180,7 +181,7 @@ func TestConnectReceivesAndReplays(t *testing.T) {
 	defer close()
 
 	// connect returns when the WS server closes.
-	go connect(wsURL, replayTarget.URL)
+	go connect(zap.NewNop(), wsURL, replayTarget.URL)
 
 	select {
 	case <-received:
@@ -200,7 +201,7 @@ func TestConnectInvalidJSONContinues(t *testing.T) {
 	})
 	defer closeTS()
 
-	go func() { done <- connect(wsURL, "http://localhost:9") }()
+	go func() { done <- connect(zap.NewNop(), wsURL, "http://localhost:9") }()
 
 	select {
 	case err := <-done:

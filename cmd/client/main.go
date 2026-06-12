@@ -6,14 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -23,8 +25,7 @@ const (
 
 // replay forwards a WebhookEvent as a real HTTP request to target and logs
 // the response status.
-func replay(event types.WebhookEvent, target string) {
-	// Build the destination URL: target + original path + original query.
+func replay(logger *zap.Logger, event types.WebhookEvent, target string) {
 	destURL := strings.TrimRight(target, "/") + event.Path
 	if event.Query != "" {
 		destURL += "?" + event.Query
@@ -32,11 +33,10 @@ func replay(event types.WebhookEvent, target string) {
 
 	req, err := http.NewRequest(event.Method, destURL, bytes.NewReader(event.Body))
 	if err != nil {
-		log.Printf("[replay] id=%s error building request: %v", event.ID, err)
+		logger.Error("replay build request error", zap.String("id", event.ID), zap.Error(err))
 		return
 	}
 
-	// Copy all original headers.
 	for key, values := range event.Headers {
 		for _, v := range values {
 			req.Header.Add(key, v)
@@ -45,19 +45,24 @@ func replay(event types.WebhookEvent, target string) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("[replay] id=%s error forwarding to %s: %v", event.ID, destURL, err)
+		logger.Error("replay forward error", zap.String("id", event.ID), zap.String("url", destURL), zap.Error(err))
 		return
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
-	log.Printf("[replay] id=%s method=%s url=%s -> %d", event.ID, event.Method, destURL, resp.StatusCode)
+	logger.Info("replay",
+		zap.String("id", event.ID),
+		zap.String("method", event.Method),
+		zap.String("url", destURL),
+		zap.Int("status", resp.StatusCode),
+	)
 }
 
 // connect establishes a WebSocket connection and reads events until an error
 // occurs. Returns the error so the caller can decide whether to reconnect.
-func connect(wsURL string, target string) error {
-	log.Printf("[client] connecting to %s", wsURL)
+func connect(logger *zap.Logger, wsURL string, target string) error {
+	logger.Info("client connecting", zap.String("url", wsURL))
 
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -70,7 +75,7 @@ func connect(wsURL string, target string) error {
 	}
 	defer conn.Close()
 
-	log.Printf("[client] connected, waiting for events (target=%s)", target)
+	logger.Info("client connected", zap.String("target", target))
 
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -80,28 +85,51 @@ func connect(wsURL string, target string) error {
 
 		var event types.WebhookEvent
 		if err := json.Unmarshal(msg, &event); err != nil {
-			log.Printf("[client] failed to unmarshal event: %v", err)
+			logger.Error("unmarshal event error", zap.Error(err))
 			continue
 		}
 
-		go replay(event, target)
+		go replay(logger, event, target)
 	}
+}
+
+func buildLogger(levelStr string, jsonFormat bool) (*zap.Logger, error) {
+	var level zapcore.Level
+	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
+		return nil, fmt.Errorf("invalid log level %q: %w", levelStr, err)
+	}
+	var cfg zap.Config
+	if jsonFormat {
+		cfg = zap.NewProductionConfig()
+	} else {
+		cfg = zap.NewDevelopmentConfig()
+	}
+	cfg.Level = zap.NewAtomicLevelAt(level)
+	return cfg.Build()
 }
 
 func main() {
 	server := flag.String("server", "ws://localhost:9000", "WebSocket server address")
 	channel := flag.String("channel", "", "channel name to subscribe to (required)")
 	target := flag.String("target", "http://localhost:8080", "local target to forward requests to")
+	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
+	jsonLog := flag.Bool("json", false, "output logs in JSON format")
 	flag.Parse()
 
+	logger, err := buildLogger(*logLevel, *jsonLog)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Sync()
+
 	if *channel == "" {
-		log.Fatal("--channel is required")
+		logger.Fatal("--channel is required")
 	}
 
-	// Construct the full WebSocket subscription URL.
 	base, err := url.Parse(*server)
 	if err != nil {
-		log.Fatalf("invalid --server URL: %v", err)
+		logger.Fatal("invalid --server URL", zap.Error(err))
 	}
 	base.Path = "/subscribe/" + *channel
 	wsURL := base.String()
@@ -109,9 +137,12 @@ func main() {
 	backoff := initialBackoff
 
 	for {
-		err := connect(wsURL, *target)
+		err := connect(logger, wsURL, *target)
 		if err != nil {
-			log.Printf("[client] connection error: %v — reconnecting in %s", err, backoff)
+			logger.Warn("connection error, reconnecting",
+				zap.Error(err),
+				zap.Duration("backoff", backoff),
+			)
 		}
 
 		time.Sleep(backoff)

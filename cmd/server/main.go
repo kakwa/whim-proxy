@@ -9,15 +9,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // subscriber wraps a single WebSocket connection for a channel.
@@ -104,13 +106,18 @@ func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 // loggingMiddleware logs every request with remote addr, method, path, status, and duration.
-func loggingMiddleware(next http.Handler) http.Handler {
+func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
-		log.Printf("[http] remote=%s method=%s path=%s status=%d duration=%s",
-			r.RemoteAddr, r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Millisecond))
+		logger.Info("http",
+			zap.String("remote", r.RemoteAddr),
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.Int("status", sw.status),
+			zap.Duration("duration", time.Since(start).Round(time.Millisecond)),
+		)
 	})
 }
 
@@ -118,11 +125,13 @@ func loggingMiddleware(next http.Handler) http.Handler {
 type server struct {
 	hub      *hub
 	upgrader websocket.Upgrader
+	logger   *zap.Logger
 }
 
-func newServer() *server {
+func newServer(logger *zap.Logger) *server {
 	return &server{
-		hub: newHub(),
+		hub:    newHub(),
+		logger: logger,
 		upgrader: websocket.Upgrader{
 			// Allow all origins for a local dev proxy tool.
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -145,7 +154,7 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("[webhook] error reading body: %v", err)
+		s.logger.Error("webhook body read error", zap.Error(err))
 		http.Error(w, "failed to read body", http.StatusInternalServerError)
 		return
 	}
@@ -162,22 +171,29 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 
 	data, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("[webhook] error marshaling event: %v", err)
+		s.logger.Error("webhook marshal error", zap.Error(err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	ch := s.hub.getOrCreate(channelName)
 	n := ch.broadcast(data)
-	log.Printf("[webhook] id=%s channel=%s method=%s path=%s query=%q body_bytes=%d subscribers=%d",
-		event.ID, channelName, event.Method, event.Path, event.Query, len(body), n)
+	s.logger.Info("webhook",
+		zap.String("id", event.ID),
+		zap.String("channel", channelName),
+		zap.String("method", event.Method),
+		zap.String("path", event.Path),
+		zap.String("query", event.Query),
+		zap.Int("body_bytes", len(body)),
+		zap.Int("subscribers", n),
+	)
 
 	if n >= 1 && len(body) > 0 {
 		var pretty bytes.Buffer
 		if err := json.Indent(&pretty, body, "", "  "); err == nil {
-			log.Printf("[webhook] id=%s payload:\n%s", event.ID, pretty.String())
+			s.logger.Debug("webhook payload", zap.String("id", event.ID), zap.String("payload", pretty.String()))
 		} else {
-			log.Printf("[webhook] id=%s payload:\n%s", event.ID, body)
+			s.logger.Debug("webhook payload", zap.String("id", event.ID), zap.String("payload", string(body)))
 		}
 	}
 
@@ -191,11 +207,11 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	channelName := vars["channel"]
 
-	log.Printf("[ws] upgrade request channel=%s remote=%s", channelName, r.RemoteAddr)
+	s.logger.Info("ws upgrade request", zap.String("channel", channelName), zap.String("remote", r.RemoteAddr))
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[ws] upgrade error channel=%s remote=%s: %v", channelName, r.RemoteAddr, err)
+		s.logger.Error("ws upgrade error", zap.String("channel", channelName), zap.String("remote", r.RemoteAddr), zap.Error(err))
 		return
 	}
 
@@ -206,16 +222,18 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.hub.getOrCreate(channelName)
 	ch.add(sub)
-	log.Printf("[ws] subscriber connected channel=%s remote=%s total=%d", channelName, r.RemoteAddr, ch.count())
+	s.logger.Info("ws subscriber connected",
+		zap.String("channel", channelName),
+		zap.String("remote", r.RemoteAddr),
+		zap.Int("total", ch.count()),
+	)
 
 	// writePump forwards queued messages to the WebSocket connection.
 	go func() {
-		defer func() {
-			conn.Close()
-		}()
+		defer conn.Close()
 		for msg := range sub.send {
 			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				log.Printf("[ws] write error channel=%s: %v", channelName, err)
+				s.logger.Error("ws write error", zap.String("channel", channelName), zap.Error(err))
 				return
 			}
 		}
@@ -226,7 +244,11 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				log.Printf("[ws] read error channel=%s remote=%s: %v", channelName, r.RemoteAddr, err)
+				s.logger.Error("ws read error",
+					zap.String("channel", channelName),
+					zap.String("remote", r.RemoteAddr),
+					zap.Error(err),
+				)
 			}
 			break
 		}
@@ -234,10 +256,14 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	ch.remove(sub)
 	close(sub.send)
-	log.Printf("[ws] subscriber disconnected channel=%s remote=%s total=%d", channelName, r.RemoteAddr, ch.count())
+	s.logger.Info("ws subscriber disconnected",
+		zap.String("channel", channelName),
+		zap.String("remote", r.RemoteAddr),
+		zap.Int("total", ch.count()),
+	)
 }
 
-func buildRouter(srv *server) http.Handler {
+func buildRouter(logger *zap.Logger, srv *server) http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/hook/{channel}", srv.hookHandler).Methods(
 		http.MethodGet,
@@ -248,16 +274,40 @@ func buildRouter(srv *server) http.Handler {
 		http.MethodOptions,
 	)
 	r.HandleFunc("/subscribe/{channel}", srv.subscribeHandler)
-	return loggingMiddleware(r)
+	return loggingMiddleware(logger, r)
+}
+
+func buildLogger(levelStr string, jsonFormat bool) (*zap.Logger, error) {
+	var level zapcore.Level
+	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
+		return nil, fmt.Errorf("invalid log level %q: %w", levelStr, err)
+	}
+	var cfg zap.Config
+	if jsonFormat {
+		cfg = zap.NewProductionConfig()
+	} else {
+		cfg = zap.NewDevelopmentConfig()
+	}
+	cfg.Level = zap.NewAtomicLevelAt(level)
+	return cfg.Build()
 }
 
 func main() {
 	addr := flag.String("addr", ":9000", "listen address")
+	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
+	jsonLog := flag.Bool("json", false, "output logs in JSON format")
 	flag.Parse()
 
-	srv := newServer()
-	log.Printf("[server] listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, buildRouter(srv)); err != nil {
-		log.Fatalf("[server] fatal: %v", err)
+	logger, err := buildLogger(*logLevel, *jsonLog)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Sync()
+
+	srv := newServer(logger)
+	logger.Info("server listening", zap.String("addr", *addr))
+	if err := http.ListenAndServe(*addr, buildRouter(logger, srv)); err != nil {
+		logger.Fatal("server fatal", zap.Error(err))
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/whim-proxy/internal/types"
+	"go.uber.org/zap"
 )
 
 func TestHubGetOrCreate(t *testing.T) {
@@ -79,8 +80,8 @@ func TestChannelBroadcastDropsSlowSubscriber(t *testing.T) {
 }
 
 func TestHookHandlerReturns200(t *testing.T) {
-	srv := newServer()
-	ts := httptest.NewServer(buildRouter(srv))
+	srv := newServer(zap.NewNop())
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
 	defer ts.Close()
 
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/ci", strings.NewReader(`{"x":1}`))
@@ -96,8 +97,8 @@ func TestHookHandlerReturns200(t *testing.T) {
 }
 
 func TestSubscribeHandlerUpgradeError(t *testing.T) {
-	srv := newServer()
-	ts := httptest.NewServer(buildRouter(srv))
+	srv := newServer(zap.NewNop())
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
 	defer ts.Close()
 
 	// Plain HTTP GET (no WS upgrade headers) — upgrader writes 400 and returns.
@@ -112,8 +113,8 @@ func TestSubscribeHandlerUpgradeError(t *testing.T) {
 }
 
 func TestWebSocketReceivesWebhookEvent(t *testing.T) {
-	srv := newServer()
-	ts := httptest.NewServer(buildRouter(srv))
+	srv := newServer(zap.NewNop())
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/subscribe/ci"
