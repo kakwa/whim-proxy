@@ -59,8 +59,13 @@ func replay(event types.WebhookEvent, target string) {
 func connect(wsURL string, target string) error {
 	log.Printf("[client] connecting to %s", wsURL)
 
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
+		if resp != nil {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			return fmt.Errorf("dial: %w (server returned HTTP %d: %s)", err, resp.StatusCode, strings.TrimSpace(string(body)))
+		}
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer conn.Close()

@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -79,6 +83,36 @@ func (h *hub) getOrCreate(name string) *channel {
 	return ch
 }
 
+// statusResponseWriter captures the HTTP status code for logging.
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+// loggingMiddleware logs every request with remote addr, method, path, status, and duration.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		log.Printf("[http] remote=%s method=%s path=%s status=%d duration=%s",
+			r.RemoteAddr, r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Millisecond))
+	})
+}
+
 // server wires together the HTTP handlers and the hub.
 type server struct {
 	hub      *hub
@@ -147,9 +181,11 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	channelName := vars["channel"]
 
+	log.Printf("[ws] upgrade request channel=%s remote=%s", channelName, r.RemoteAddr)
+
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[ws] upgrade error on channel=%s: %v", channelName, err)
+		log.Printf("[ws] upgrade error channel=%s remote=%s: %v", channelName, r.RemoteAddr, err)
 		return
 	}
 
@@ -160,7 +196,7 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.hub.getOrCreate(channelName)
 	ch.add(sub)
-	log.Printf("[ws] subscriber connected channel=%s total=%d", channelName, ch.count())
+	log.Printf("[ws] subscriber connected channel=%s remote=%s total=%d", channelName, r.RemoteAddr, ch.count())
 
 	// writePump forwards queued messages to the WebSocket connection.
 	go func() {
@@ -179,13 +215,16 @@ func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
+			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				log.Printf("[ws] read error channel=%s remote=%s: %v", channelName, r.RemoteAddr, err)
+			}
 			break
 		}
 	}
 
 	ch.remove(sub)
 	close(sub.send)
-	log.Printf("[ws] subscriber disconnected channel=%s total=%d", channelName, ch.count())
+	log.Printf("[ws] subscriber disconnected channel=%s remote=%s total=%d", channelName, r.RemoteAddr, ch.count())
 }
 
 func buildRouter(srv *server) http.Handler {
@@ -199,7 +238,7 @@ func buildRouter(srv *server) http.Handler {
 		http.MethodOptions,
 	)
 	r.HandleFunc("/subscribe/{channel}", srv.subscribeHandler)
-	return r
+	return loggingMiddleware(r)
 }
 
 func main() {
