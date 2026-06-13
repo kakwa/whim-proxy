@@ -171,7 +171,7 @@ graph TD
         CLC -->|HTTP replay| LC
     end
 
-    WS -->|POST /hook/\<UUID\>| SRV
+    WS -->|POST /hook/UUID| SRV
     CH1 -->|WebSocket broadcast| CLA
     CH1 -->|WebSocket broadcast| CLB
     CH2 -->|WebSocket broadcast| CLC
