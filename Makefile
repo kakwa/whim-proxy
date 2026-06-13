@@ -4,7 +4,7 @@ CLIENT      := $(BIN_DIR)/whim-client
 WEB_CLIENTS := internal/web/clients
 WEB_STATIC  := internal/web/static
 
-VERSION ?= 0.1.6
+VERSION ?= 0.1.7
 TAG_VERSION := $(VERSION)
 GIT_VERSION := $(shell git -C . describe --tags --always --dirty 2>/dev/null)
 ifneq ($(GIT_VERSION),)
