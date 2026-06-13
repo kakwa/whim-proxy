@@ -13,26 +13,26 @@
       color: #1a1a1a;
       max-width: 1120px;
       margin: 0 auto;
-      padding: 2rem 1.5rem 4rem;
+      padding: 1.2rem 1.5rem 2.4rem;
       line-height: 1.65;
     }
-    header { text-align: center; padding: 2.5rem 0 0.5rem; }
-    header img { max-width: 320px; width: 100%; }
-    h1 { font-size: 2.1rem; font-weight: 700; margin: .9rem 0 .3rem; letter-spacing: -.5px; }
+    header { text-align: center; padding: .8rem 0 .4rem; }
+    header img { max-width: 288px; width: 100%; }
+    h1 { font-size: 2.1rem; font-weight: 700; margin: .6rem 0 .2rem; letter-spacing: -.5px; }
     .tagline { color: #555; font-size: 1.05rem; }
-    .version { font-size: .82rem; color: #999; margin-top: .4rem; font-family: monospace; }
+    .version { font-size: .82rem; color: #999; margin-top: .3rem; font-family: monospace; }
     h2 {
       font-size: 1.15rem;
       font-weight: 600;
-      margin: 1rem 0 .8rem;
-      padding-bottom: .35rem;
+      margin: .7rem 0 .5rem;
+      padding-bottom: .3rem;
       border-bottom: 1px solid #ebebeb;
     }
     pre {
       background: #f6f8fa;
       border: 1px solid #e0e4e8;
       border-radius: 6px;
-      padding: 1.1rem 1.3rem;
+      padding: .8rem 1.1rem;
       overflow-x: auto;
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
       font-size: .875rem;
@@ -62,12 +62,11 @@
   <img src="/favicon.svg" alt="whim-proxy logo">
   <h1>whim-proxy</h1>
   <p class="tagline">Reverse-tunnel webhooks to your laptop</p>
-  <p class="version">version: {{.Version}}</p>
 </header>
 
 <section>
-  <h2>Quick start</h2>
-  <pre><span class="comment"># 1. Download client (see Download section below)</span>
+    <h2>Quick start</h2>
+    <pre><span class="comment"># 1. Download client (see Download section below)</span>
 
 <span class="comment"># 2. Generate a channel UUID (can be reused across sessions)</span>
 CHANNEL=$(./whim-client --gen-uuid)
@@ -90,29 +89,30 @@ curl -X POST {{.HTTPScheme}}://{{.Host}}/hook/$CHANNEL \
 
 <section>
   <h2>Download client</h2>
-  {{if .Clients}}
-  <table>
-    <tr><th>Platform</th><th>Binary</th></tr>
-    {{range .Clients}}
-    <tr>
-      <td>{{.Display}}</td>
-      <td><a href="{{.URL}}">{{.Name}}</a></td>
-    </tr>
-    {{end}}
-  </table>
-  {{else}}
-  <p class="note">
-    Client binaries are not bundled in this build.<br>
-    Run <code>make build</code> to embed them, or download from
-    <a href="https://github.com/kakwa/whim-proxy/releases">GitHub Releases</a>.
-  </p>
+    {{if .Clients}}
+    <table>
+      <tr><th>Platform</th><th>Binary</th></tr>
+      {{range .Clients}}
+      <tr>
+        <td>{{.Display}}</td>
+        <td><a href="{{.URL}}">{{.Name}}</a></td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}
+    <p class="note">
+      Client binaries are not bundled in this build.<br>
+      Run <code>make build</code> to embed them, or download from
+      <a href="https://github.com/kakwa/whim-proxy/releases">GitHub Releases</a>.
+    </p>
   {{end}}
 </section>
 
 <section>
   <p class="note">
-    Full documentation, source code, and releases:
-    <a href="https://github.com/kakwa/whim-proxy">github.com/kakwa/whim-proxy</a>
+    version: {{.Version}} &nbsp;·&nbsp;
+    Full documentation and source code: <a href="https://github.com/kakwa/whim-proxy">github.com/kakwa/whim-proxy</a> &nbsp;·&nbsp;
+    © 2026 Pierre-Francois CARPENTIER
   </p>
 </section>
 
