@@ -2,8 +2,9 @@ BIN_DIR     := bin
 SERVER      := $(BIN_DIR)/whim-server
 CLIENT      := $(BIN_DIR)/whim-client
 WEB_CLIENTS := internal/web/clients
+WEB_STATIC  := internal/web/static
 
-VERSION ?= 0.1.2
+VERSION ?= 0.1.3
 TAG_VERSION := $(VERSION)
 GIT_VERSION := $(shell git -C . describe --tags --always --dirty 2>/dev/null)
 ifneq ($(GIT_VERSION),)
@@ -13,11 +14,15 @@ LDFLAGS      := -ldflags "-X main.version=$(VERSION)"
 # Distribution builds: strip debug info and disable CGO for static/portable binaries.
 DIST_LDFLAGS := -ldflags "-X main.version=$(VERSION) -s -w"
 
-.PHONY: all build server client clients run-server run-client clean test coverage vet fmt tag
+.PHONY: all build server client clients favicon run-server run-client clean test coverage vet fmt tag
 
 all: build
 
 build: server client
+
+# Copy the root logo into the static dir so go:embed picks it up.
+favicon:
+	cp logo.svg $(WEB_STATIC)/favicon.svg
 
 # Cross-compile the client for all supported platforms and embed in the server.
 clients:
@@ -34,7 +39,7 @@ clients:
 	done
 
 # Build server after cross-compiling clients so they get embedded.
-server: clients
+server: favicon clients
 	go build $(LDFLAGS) -o $(SERVER) ./cmd/server
 
 # Build client for the current platform only.
@@ -65,6 +70,7 @@ fmt:
 clean:
 	rm -rf $(BIN_DIR)
 	rm -f $(WEB_CLIENTS)/whim-client-*
+	rm -f $(WEB_STATIC)/favicon.svg
 
 tag:
 	git tag -a $(TAG_VERSION) -m "release $(TAG_VERSION)"
