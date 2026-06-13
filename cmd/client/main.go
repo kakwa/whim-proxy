@@ -178,6 +178,7 @@ func buildLogger(levelStr string, jsonFormat bool) (*zap.Logger, error) {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
 	server := flag.String("server", "", "WebSocket server address (required)")
 	channel := flag.String("channel", "", "channel name to subscribe to (required)")
 	target := flag.String("target", "http://localhost:8080", "local target to forward requests to")
@@ -187,6 +188,11 @@ func main() {
 	logsFlag := flag.Bool("logs", false, "fetch and print the last received events for the channel, then exit")
 	maxReplayConcurrency := flag.Int("max-replay-concurrency", 10, "max concurrent webhook replays (0 = unlimited)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	if *genUUID {
 		fmt.Println(uuid.New())

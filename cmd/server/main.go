@@ -474,6 +474,7 @@ func initStore(logger *zap.Logger, redisURL string, redisTTL time.Duration, back
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
 	addr := flag.String("addr", ":9000", "listen address")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	jsonLog := flag.Bool("json", false, "output logs in JSON format")
@@ -487,6 +488,11 @@ func main() {
 	maxHookBurst := flag.Int("max-hook-burst", 200, "token bucket burst size for per-channel webhook rate limit")
 	maxBodyBytes := flag.Int64("max-body-bytes", 1<<20, "max webhook body size in bytes (default 1 MiB)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	logger, err := buildLogger(*logLevel, *jsonLog)
 	if err != nil {
