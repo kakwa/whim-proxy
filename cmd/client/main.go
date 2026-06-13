@@ -47,6 +47,14 @@ func replay(logger *zap.Logger, event types.WebhookEvent, target string) {
 	}
 	req.Header.Set("X-Whim-Proxy-Client", version)
 
+	logger.Debug("replay event",
+		zap.String("id", event.ID),
+		zap.String("method", event.Method),
+		zap.String("url", destURL),
+		zap.Any("headers", event.Headers),
+		zap.ByteString("body", event.Body),
+	)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		logger.Error("replay forward error", zap.String("id", event.ID), zap.String("url", destURL), zap.Error(err))
