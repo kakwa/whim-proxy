@@ -1,4 +1,7 @@
-<h1>whim-proxy <img src="logo.svg" alt="whim-proxy" width="294" valign="middle"></h1>
+<p align="center">
+  <img src="logo.svg" alt="whim-proxy" width="294">
+</p>
+<h1 align="center">Webhook In the Middle Proxy</h1>
 
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
