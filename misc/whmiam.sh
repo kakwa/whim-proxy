@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Just a quick one liner
+python3 -c "from http.server import HTTPServer,BaseHTTPRequestHandler;import json;s=lambda d:d.decode('utf-8','replace')if isinstance(d,bytes)else d;H=type('H',(BaseHTTPRequestHandler,),{'do_POST':lambda self:self._h(),'do_GET':lambda self:self._h(),'do_PUT':lambda self:self._h(),'do_PATCH':lambda self:self._h(),'do_DELETE':lambda self:self._h(),'_h':lambda self:[print('\n---'),print(f'{self.command} {self.path}'),print('\n[Headers]'),[print(f'  {k}: {v}')for k,v in self.headers.items()],print('\n[Body]'),print(s(self.rfile.read(int(self.headers.get('Content-Length',0))))),self.send_response(200),self.end_headers(),self.wfile.write(b'OK')],'log_message':lambda self,*a:None});HTTPServer(('',8080),H).serve_forever()"
