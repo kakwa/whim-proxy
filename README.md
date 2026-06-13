@@ -6,21 +6,23 @@
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
-Whim-proxy (WebHook In the Middle Proxy) is a lightweight tool designed to help developers implementing webhook consumers.
+Whim-proxy (WebHook In the Middle Proxy) is a lightweight tool designed to help developers implement webhook consumers.
 
-Webhook producers often can't reach a developer machine behind NAT nor could they be run locally (ex: third-party like GitHub or Stripe).
+Webhook producers often can't reach a developer machine behind NAT nor could they be run locally (e.g. third-party like GitHub or Stripe).
 
 Whim-proxy solves this issue with a `whim-server` & `whim-client` combo working as follows:
 
-1. A public/reachable webhook listener of `whim-server` receives the events.
-2. Each event is then forwarded to subscribed `whim-client` processes running on developers laptop using websocket reverse tunnels.
-3. Finally the `whim-client` takes the event, and reproduces the original webhook, targeting the local consumer instance being developed/tested.
+1. A public/reachable webhook listener on `whim-server` receives the events.
+2. Each event is then forwarded to subscribed `whim-client` processes running on developer's laptop using WebSocket reverse tunnels.
+3. Finally, the `whim-client` takes the event, and reproduces the original webhook, targeting the local consumer instance being developed/tested.
 
 ## Public instance
 
-A hosted instance is available at [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/) if you want to try whim-proxy without running your own server. Download a client from the page, open a channel, and point your webhook sender at it.
+A hosted instance is available at [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/) if you want to try whim-proxy without deploying your own server.
 
-**Do not send production or sensitive data** — payloads pass through shared infrastructure and may be retained briefly in server logs.
+Download the client from the page, open a channel, and point your webhook sender at it.
+
+Don't send sensitive data, cats cannot be trusted after all.
 
 ## Quick start
 
@@ -51,14 +53,14 @@ automatically with exponential backoff if the server drops.
 
 ### Server (`whim-server`)
 
-| Flag             | Default   | Description                                                      |
-|------------------|-----------|------------------------------------------------------------------|
-| `--addr`         | `:9000`   | TCP listen address                                               |
-| `--log-level`    | `info`    | Log verbosity: `debug`, `info`, `warn`, `error`                  |
-| `--json`         | `false`   | Emit logs as JSON (default: console)                             |
-| `--backlog-size` | `10000`   | Max events kept globally in the in-memory store                  |
-| `--redis-url`    |           | Redis URL (`redis://...`) — enables Redis store                  |
-| `--redis-ttl`    | `24h`     | TTL applied to each Redis channel key after its last write       |
+| Flag                  | Default  | Description                                                  |
+|-----------------------|----------|--------------------------------------------------------------|
+| `--addr`              | `:9000`  | TCP listen address                                           |
+| `--log-level`         | `info`   | Log verbosity: `debug`, `info`, `warn`, `error`              |
+| `--json`              | `false`  | Emit logs as JSON (default: console)                         |
+| `--backlog-size`      | `10000`  | Max events kept globally in the in-memory store              |
+| `--redis-url`         |          | Redis URL (`redis://...`) — enables Redis store              |
+| `--redis-ttl`         | `24h`    | TTL applied to each Redis channel key after its last write   |
 | `--max-channels`      | `100000` | Max distinct channels tracked (0 = unlimited)                |
 | `--max-clients`       | `100`    | Max WebSocket subscribers per channel (0 = unlimited)        |
 | `--max-clients-per-ip`| `1000`   | Max WebSocket subscribers per source IP (0 = unlimited)      |
@@ -96,7 +98,7 @@ curl http://<public-host>:9000/logs/<channel-uuid>
 ### Event store
 
 By default events are kept in a global in-memory ring buffer (`--backlog-size`,
-default 10 000). When the buffer is full, the oldest event across all channels
+default 10,000). When the buffer is full, the oldest event across all channels
 is silently evicted.
 
 For persistence across restarts, pass `--redis-url`:
@@ -120,7 +122,7 @@ newline-delimited JSON, suitable for log aggregators (Loki, CloudWatch, etc.):
 ./bin/whim-server --json --log-level debug
 ```
 
-At `debug` level the server also logs the full decoded webhook payload for each
+At `debug` level, the server also logs the full decoded webhook payload for each
 event that has at least one subscriber.
 
 ## Version headers
