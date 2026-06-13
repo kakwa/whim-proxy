@@ -3,6 +3,8 @@
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
+> **Public instance:** [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/)
+
 Whim-proxy (WebHook In the Middle Proxy) is a lightweight webhook proxy designed to help developers test webhook consumer development.
 
 Frequently, webhook event senders cannot be integrated with a private/NATed developer laptop, either because it's too complex, or part of a third-party service like GitHub or Stripe.
