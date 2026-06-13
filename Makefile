@@ -52,10 +52,10 @@ run-server:
 run-client:
 	./$(CLIENT) --server ws://localhost:9000 --channel myapp --target http://localhost:8080
 
-test:
+test: favicon
 	go test -race ./...
 
-coverage:
+coverage: favicon
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -func=coverage.out
 	go tool cover -html=coverage.out -o coverage.html

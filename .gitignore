@@ -8,6 +8,8 @@ internal/web/clients/whim-client-*
 # Generated from logo.svg by 'make build'
 internal/web/static/favicon.svg
 
-# Site-specific nginx configs (contain hostnames and cert paths)
+# Site-specific nginx/misc configs (contain hostnames and cert paths)
 nginx/*.kakwalab.dev.conf
 nginx/*.kakwalab.ovh.conf
+misc/*.kakwalab.dev.conf
+misc/*.kakwalab.ovh.conf
