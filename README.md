@@ -6,17 +6,21 @@
 [![CI](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kakwa/whim-proxy/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kakwa/whim-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/kakwa/whim-proxy)
 
-> **Public instance:** [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/)
+Whim-proxy (WebHook In the Middle Proxy) is a lightweight tool designed to help developers implementing webhook consumers.
 
-Whim-proxy (WebHook In the Middle Proxy) is a lightweight webhook proxy designed to help developers test webhook consumer development.
+Webhook producers often can't reach a developer machine behind NAT nor could they be run locally (ex: third-party like GitHub or Stripe).
 
-Frequently, webhook event senders cannot be integrated with a private/NATed developer laptop, either because it's too complex, or part of a third-party service like GitHub or Stripe.
+Whim-proxy solves this issue with a `whim-server` & `whim-client` combo working as follows:
 
-Whim-proxy solves this issue with a `whim-server` & `whim-client` working as follows:
+1. A public/reachable webhook listener of `whim-server` receives the events.
+2. Each event is then forwarded to subscribed `whim-client` processes running on developers laptop using websocket reverse tunnels.
+3. Finally the `whim-client` takes the event, and reproduces the original webhook, targeting the local consumer instance being developed/tested.
 
-1. a public/reachable webhook listener (`whim-server`) receiving the events.
-2. Each event is then forwarded to subscribed `whim-client` running on developer laptops using websocket reverse tunnels.
-3. Finally the `whim-client` takes the event, and reproduces the original webhook, targeting the local consumer instance being developed.
+## Public instance
+
+A hosted instance is available at [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/) if you want to try whim-proxy without running your own server. Download a client from the page, open a channel, and point your webhook sender at it.
+
+**Do not send production or sensitive data** — payloads pass through shared infrastructure and may be retained briefly in server logs.
 
 ## Quick start
 
@@ -47,14 +51,14 @@ automatically with exponential backoff if the server drops.
 
 ### Server (`whim-server`)
 
-| Flag             | Default   | Description                                                   |
-|------------------|-----------|---------------------------------------------------------------|
-| `--addr`         | `:9000`   | TCP listen address                                            |
-| `--log-level`    | `info`    | Log verbosity: `debug`, `info`, `warn`, `error`               |
-| `--json`         | `false`   | Emit logs as JSON (default: console)                          |
-| `--backlog-size` | `10000`   | Max events kept globally in the in-memory store               |
-| `--redis-url`    |           | Redis URL (`redis://...`) — enables Redis store               |
-| `--redis-ttl`    | `24h`     | TTL applied to each Redis channel key after its last write    |
+| Flag             | Default   | Description                                                      |
+|------------------|-----------|------------------------------------------------------------------|
+| `--addr`         | `:9000`   | TCP listen address                                               |
+| `--log-level`    | `info`    | Log verbosity: `debug`, `info`, `warn`, `error`                  |
+| `--json`         | `false`   | Emit logs as JSON (default: console)                             |
+| `--backlog-size` | `10000`   | Max events kept globally in the in-memory store                  |
+| `--redis-url`    |           | Redis URL (`redis://...`) — enables Redis store                  |
+| `--redis-ttl`    | `24h`     | TTL applied to each Redis channel key after its last write       |
 | `--max-channels`      | `100000` | Max distinct channels tracked (0 = unlimited)                |
 | `--max-clients`       | `100`    | Max WebSocket subscribers per channel (0 = unlimited)        |
 | `--max-clients-per-ip`| `1000`   | Max WebSocket subscribers per source IP (0 = unlimited)      |
@@ -75,11 +79,11 @@ automatically with exponential backoff if the server drops.
 
 ## API
 
-| Method | Path                   | Description                                      |
-|--------|------------------------|--------------------------------------------------|
-| `*`    | `/hook/{uuid}`         | Receive a webhook and broadcast it to subscribers |
-| `GET`  | `/subscribe/{uuid}`    | WebSocket — subscribe to a channel               |
-| `GET`  | `/logs/{uuid}`         | Return the last 10 events received on a channel  |
+| Method | Path                  | Description                                       |
+|--------|-----------------------|---------------------------------------------------|
+| `*`    | `/hook/{uuid}`        | Receive a webhook and broadcast it to subscribers |
+| `GET`  | `/subscribe/{uuid}`   | WebSocket — subscribe to a channel                |
+| `GET`  | `/logs/{uuid}`        | Return the last 10 events received on a channel   |
 
 The `/logs/{uuid}` response is a JSON array of `WebhookEvent` objects in
 chronological order (oldest first). Returns an empty array if no events have
