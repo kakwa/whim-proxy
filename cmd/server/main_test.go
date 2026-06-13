@@ -19,6 +19,7 @@ import (
 	"github.com/whim-proxy/internal/uuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/time/rate"
 )
 
 // failWriter is an http.ResponseWriter whose Write always returns an error.
@@ -648,4 +649,99 @@ func TestSubscribeHandlerIPLimitReturns503(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("second connection: got %d, want 503", resp.StatusCode)
 	}
+}
+
+func TestHookHandlerLoopDetected(t *testing.T) {
+	_, ts := newTestServer()
+	defer ts.Close()
+
+	ch := uuid.New()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(`{}`))
+	req.Header.Set("X-Whim-Proxy-Client", "test-client-v1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestHookHandlerBodyTooLarge(t *testing.T) {
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 100000, 100, 1000, 0, 0, 4)
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	ch := uuid.New()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(`{"x":1}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status: got %d, want 413", resp.StatusCode)
+	}
+}
+
+func TestHookHandlerRateLimit(t *testing.T) {
+	// rate=1/sec burst=1: second immediate request must be rate-limited.
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 100000, 100, 1000, rate.Limit(1), 1, 1<<20)
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	ch := uuid.New()
+	post := func() int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch, strings.NewReader(`{}`))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := post(); code != http.StatusOK {
+		t.Fatalf("first request: got %d, want 200", code)
+	}
+	if code := post(); code != http.StatusTooManyRequests {
+		t.Errorf("rate-limited request: got %d, want 429", code)
+	}
+}
+
+func TestSubscribeHandlerChannelLimitViaHubFull(t *testing.T) {
+	// Hub capped at 1 channel; fill it via a hook POST, then subscribe to a new channel.
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 1, 100, 1000, 0, 0, 1<<20)
+	ts := httptest.NewServer(buildRouter(zap.NewNop(), srv))
+	defer ts.Close()
+
+	ch1 := uuid.New()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/hook/"+ch1, strings.NewReader(`{}`))
+	if resp, err := http.DefaultClient.Do(req); err != nil {
+		t.Fatalf("hook post: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+
+	resp, err := http.Get(ts.URL + "/subscribe/" + uuid.New())
+	if err != nil {
+		t.Fatalf("subscribe request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("got %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestSubscribeHandlerEmptyIP(t *testing.T) {
+	srv := newServer(zap.NewNop(), store.NewMemory(10), 100000, 100, 1000, 0, 0, 1<<20)
+	ch := uuid.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/subscribe/"+ch, nil)
+	req = mux.SetURLVars(req, map[string]string{"channel": ch})
+	req.RemoteAddr = "127.0.0.1" // no port → ip="" branch triggered
+	w := httptest.NewRecorder()
+	srv.subscribeHandler(w, req)
+	// Upgrade fails (no WS headers); ip="" path was covered before returning.
 }

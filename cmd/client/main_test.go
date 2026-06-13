@@ -351,3 +351,70 @@ func TestFetchLogsDecodeError(t *testing.T) {
 	}
 }
 
+// --- connect with semaphore ---
+
+func TestConnectWithSem(t *testing.T) {
+	received := make(chan struct{}, 1)
+	replayTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer replayTarget.Close()
+
+	event := types.WebhookEvent{
+		ID:     "sem01",
+		Method: http.MethodPost,
+		Path:   "/hook/test",
+		Body:   []byte(`{}`),
+	}
+	data, _ := json.Marshal(event)
+
+	wsURL, closeTS := newWSServer(t, func(conn *websocket.Conn) {
+		conn.WriteMessage(websocket.TextMessage, data)
+		time.Sleep(50 * time.Millisecond)
+	})
+	defer closeTS()
+
+	sem := make(chan struct{}, 2)
+	go connect(zap.NewNop(), wsURL, replayTarget.URL, sem)
+
+	select {
+	case <-received:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replay target did not receive the forwarded request")
+	}
+}
+
+func TestConnectSemFull(t *testing.T) {
+	// Unbuffered semaphore: select always falls through to default, event is dropped.
+	event := types.WebhookEvent{
+		ID:     "drop01",
+		Method: http.MethodPost,
+		Path:   "/hook/test",
+		Body:   []byte(`{}`),
+	}
+	data, _ := json.Marshal(event)
+
+	wsURL, closeTS := newWSServer(t, func(conn *websocket.Conn) {
+		conn.WriteMessage(websocket.TextMessage, data)
+		time.Sleep(20 * time.Millisecond)
+	})
+	defer closeTS()
+
+	done := make(chan error, 1)
+	sem := make(chan struct{}, 0)
+	go func() { done <- connect(zap.NewNop(), wsURL, "http://localhost:9", sem) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected read error after server close")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("connect did not return after server closed")
+	}
+}
+

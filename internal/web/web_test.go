@@ -206,3 +206,41 @@ func TestClientFilename(t *testing.T) {
 		}
 	}
 }
+
+// TestRequestSchemeTLS verifies that r.TLS != nil causes requestScheme to return "https".
+func TestRequestSchemeTLS(t *testing.T) {
+	ts := httptest.NewTLSServer(newRouter("dev"))
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "wss://") {
+		t.Error("expected wss:// scheme for TLS request")
+	}
+}
+
+// TestClientDownloadSuccess checks that an embedded file in clients/ is served correctly.
+func TestClientDownloadSuccess(t *testing.T) {
+	ts := httptest.NewServer(newRouter("dev"))
+	defer ts.Close()
+
+	// placeholder.txt is always embedded regardless of whether client binaries are built.
+	resp, err := http.Get(ts.URL + "/clients/placeholder.txt")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type: got %q, want application/octet-stream", ct)
+	}
+}
