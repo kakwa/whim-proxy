@@ -4,3 +4,7 @@ coverage.html
 
 # Cross-compiled client binaries embedded in the server (built by 'make build')
 internal/web/clients/whim-client-*
+
+# Site-specific nginx configs (contain hostnames and cert paths)
+nginx/*.kakwalab.dev.conf
+nginx/*.kakwalab.ovh.conf
