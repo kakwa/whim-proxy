@@ -4,6 +4,7 @@ CLIENT      := $(BIN_DIR)/whim-client
 WEB_CLIENTS := internal/web/clients
 
 VERSION ?= 0.1.0
+TAG_VERSION := $(VERSION)
 GIT_VERSION := $(shell git -C . describe --tags --always --dirty 2>/dev/null)
 ifneq ($(GIT_VERSION),)
   VERSION := $(GIT_VERSION)
@@ -66,4 +67,4 @@ clean:
 	rm -f $(WEB_CLIENTS)/whim-client-*
 
 tag:
-	git tag -a $(VERSION) -m "release $(VERSION)"
+	git tag -a $(TAG_VERSION) -m "release $(TAG_VERSION)"
