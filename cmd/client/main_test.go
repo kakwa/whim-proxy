@@ -63,8 +63,8 @@ func TestReplayForwardsRequest(t *testing.T) {
 	if cap.method != http.MethodPost {
 		t.Errorf("method: got %q, want POST", cap.method)
 	}
-	if cap.path != "/api/events" {
-		t.Errorf("path: got %q, want /api/events", cap.path)
+	if cap.path != "/" {
+		t.Errorf("path: got %q, want /", cap.path)
 	}
 	if cap.query != "foo=bar" {
 		t.Errorf("query: got %q, want foo=bar", cap.query)

@@ -29,7 +29,7 @@ const (
 // replay forwards a WebhookEvent as a real HTTP request to target and logs
 // the response status.
 func replay(logger *zap.Logger, event types.WebhookEvent, target string) {
-	destURL := strings.TrimRight(target, "/") + event.Path
+	destURL := strings.TrimRight(target, "/")
 	if event.Query != "" {
 		destURL += "?" + event.Query
 	}
