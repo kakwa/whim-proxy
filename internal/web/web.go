@@ -20,9 +20,11 @@ var indexTmpl = template.Must(
 )
 
 type pageData struct {
-	Version string
-	Host    string
-	Clients []clientEntry
+	Version    string
+	Host       string
+	HTTPScheme string // "http" or "https"
+	WSScheme   string // "ws"  or "wss"
+	Clients    []clientEntry
 }
 
 type clientEntry struct {
@@ -84,16 +86,35 @@ func RegisterHandlers(r *mux.Router, version string) {
 	r.HandleFunc("/clients/{filename}", clientDownloadHandler).Methods(http.MethodGet, http.MethodHead)
 }
 
+// requestScheme returns "https" when the request arrived over TLS or was
+// forwarded from an HTTPS-terminating proxy (X-Forwarded-Proto header).
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return "https"
+	}
+	return "http"
+}
+
 func indexHandler(version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if host == "" {
 			host = "localhost:9000"
 		}
+		httpScheme := requestScheme(r)
+		wsScheme := "ws"
+		if httpScheme == "https" {
+			wsScheme = "wss"
+		}
 		data := pageData{
-			Version: version,
-			Host:    host,
-			Clients: availableClients(),
+			Version:    version,
+			Host:       host,
+			HTTPScheme: httpScheme,
+			WSScheme:   wsScheme,
+			Clients:    availableClients(),
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := indexTmpl.Execute(w, data); err != nil {

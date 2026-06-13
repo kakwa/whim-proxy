@@ -64,8 +64,32 @@ func TestIndexHostFallback(t *testing.T) {
 	req.Host = ""
 	r.ServeHTTP(w, req)
 
-	if !strings.Contains(w.Body.String(), "localhost:9000") {
+	body := w.Body.String()
+	if !strings.Contains(body, "localhost:9000") {
 		t.Error("expected fallback host 'localhost:9000' in page body")
+	}
+	// Plain HTTP request → ws:// and http://
+	if !strings.Contains(body, "ws://") {
+		t.Error("expected ws:// scheme for plain HTTP request")
+	}
+}
+
+// TestIndexHTTPSScheme checks that X-Forwarded-Proto: https flips schemes to wss:// and https://.
+func TestIndexHTTPSScheme(t *testing.T) {
+	r := mux.NewRouter()
+	RegisterHandlers(r, "dev")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	r.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "wss://") {
+		t.Error("expected wss:// scheme when X-Forwarded-Proto: https")
+	}
+	if !strings.Contains(body, "https://") {
+		t.Error("expected https:// scheme when X-Forwarded-Proto: https")
 	}
 }
 

@@ -74,13 +74,18 @@ CHANNEL=$(./whim-client --gen-uuid)
 echo "$CHANNEL"
 
 <span class="comment"># 3. Start the client on your laptop</span>
-./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --target http://localhost:8080/webhook
+./whim-client --server {{.WSScheme}}://{{.Host}} --channel "$CHANNEL" --target http://localhost:8080/webhook
 
 <span class="comment"># 4. Configure your webhook sender to POST to:</span>
-echo "http://{{.Host}}/hook/$CHANNEL"
+echo "{{.HTTPScheme}}://{{.Host}}/hook/$CHANNEL"
 
-<span class="comment"># 5. Check received events:</span>
-./whim-client --server ws://{{.Host}} --channel "$CHANNEL" --logs</pre>
+<span class="comment"># 5. Trigger a test event with curl:</span>
+curl -X POST {{.HTTPScheme}}://{{.Host}}/hook/$CHANNEL \
+     -H "Content-Type: application/json" \
+     -d '{"event":"test"}'
+
+<span class="comment"># 6. Check received events:</span>
+./whim-client --server {{.WSScheme}}://{{.Host}} --channel "$CHANNEL" --logs</pre>
 </section>
 
 <section>
