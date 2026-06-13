@@ -8,17 +8,17 @@
 
 Whim-proxy (WebHook In the Middle Proxy) is a lightweight tool designed to help developers implement webhook consumers.
 
-Webhook producers often can't reach a developer machine behind NAT nor could they be run locally (e.g. third-party like GitHub or Stripe).
+Webhook producers often can't reach NATed/firewalled developer machines nor could they be run locally (e.g. third-party like GitHub or Stripe).
 
 Whim-proxy solves this issue with a `whim-server` & `whim-client` combo working as follows:
 
-1. A public/reachable webhook listener on `whim-server` receives the events.
-2. Each event is then forwarded to subscribed `whim-client` processes running on developer's laptop using WebSocket reverse tunnels.
-3. Finally, the `whim-client` takes the event, and reproduces the original webhook, targeting the local consumer instance being developed/tested.
+1. A public/reachable webhook listener on `whim-server` receives the events from producers.
+2. Each event is then forwarded to subscribed `whim-client` processes running on developer's laptop via WebSocket reverse-tunnels.
+3. Finally, the `whim-client` takes the event, and reproduces the original webhook, targeting the local consumer being developed/tested.
 
 ## Public instance
 
-A hosted instance is available at [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/) if you want to try whim-proxy without deploying your own server.
+A public instance is available at [https://whim-proxy.kakwalab.dev/](https://whim-proxy.kakwalab.dev/) if you don't want to deploy your own server.
 
 Download the client from the page, open a channel, and point your webhook sender at it.
 
@@ -31,7 +31,7 @@ Don't send sensitive data, cats cannot be trusted after all.
 git clone https://github.com/kakwa/whim-proxy && cd whim-proxy
 make build
 
-# Set a server listen 
+# Set a server listen address
 WHIM_SERVER=localhost:9000
 
 # Generate a channel uuid (can be reused accross sessions)
@@ -39,6 +39,8 @@ CHANNEL=$(./bin/whim-client --gen-uuid)
 
 # Set the target Webhook url of your local event consumer
 TARGET=http://localhost:8080/webhook
+
+
 
 # 1. Start the proxy server on a public host (listens on :9000 by default)
 ./bin/whim-server -addr $WHIM_SERVER --log-level debug
@@ -54,6 +56,14 @@ curl -X POST "http://$WHIM_SERVER/hook/$CHANNEL" \
      -H "Content-Type: application/json" \
      -d '{"event":"ping"}'
 ```
+
+> **Channel names must be valid UUIDs.** The server rejects hook and subscribe
+> requests with a `400` if the channel is not a well-formed UUID v4.
+
+> Treat the channel UUID somewhat as a secret.
+> If the channel UUID is known, eavesdroppers could easily subscribe to your events. 
+
+
 
 ## Flags
 
@@ -82,10 +92,8 @@ curl -X POST "http://$WHIM_SERVER/hook/$CHANNEL" \
 | `--json`      | `false`                 | Emit logs as JSON (default: console)             |
 | `--gen-uuid`  |                         | Print a new UUID to stdout and exit              |
 
-> **Channel names must be valid UUIDs.** The server rejects hook and subscribe
-> requests with a `400` if the channel is not a well-formed UUID v4.
-
 ## API
+
 
 | Method | Path                  | Description                                       |
 |--------|-----------------------|---------------------------------------------------|
@@ -93,21 +101,13 @@ curl -X POST "http://$WHIM_SERVER/hook/$CHANNEL" \
 | `GET`  | `/subscribe/{uuid}`   | WebSocket — subscribe to a channel                |
 | `GET`  | `/logs/{uuid}`        | Return the last 10 events received on a channel   |
 
-The `/logs/{uuid}` response is a JSON array of `WebhookEvent` objects in
-chronological order (oldest first). Returns an empty array if no events have
-been received yet.
-
-```bash
-curl http://<public-host>:9000/logs/<channel-uuid>
-```
-
 ### Event store
 
-By default events are kept in a global in-memory ring buffer (`--backlog-size`,
-default 10,000). When the buffer is full, the oldest event across all channels
-is silently evicted.
+By default events and logs are kept in a local in-memory ring buffer with a set capacity.
 
-For persistence across restarts, pass `--redis-url`:
+For persistence across restarts and/or in a load balanced/HA setup, using Redis is recommended.
+
+To do so, pass `--redis-url` and optionally, the set retention with `--redis-ttl`:
 
 ```bash
 ./bin/whim-server --redis-url redis://localhost:6379 --redis-ttl 48h
@@ -119,24 +119,24 @@ new event so the key expires only after a period of inactivity.
 
 ## Logging
 
-Both binaries use structured [zap](https://github.com/uber-go/zap) logging.
+Both client & server use structured [zap](https://github.com/uber-go/zap) logging.
 
-By default logs are human-readable console output. Pass `--json` to switch to
-newline-delimited JSON, suitable for log aggregators (Loki, CloudWatch, etc.):
+By default logs are human-readable console output.
+
+Pass `--json` to switch to JSON-formatted logs.
+
+At `debug` level, the server also logs the full decoded webhook payload for each
+event that has at least one subscriber.
+
 
 ```bash
 ./bin/whim-server --json --log-level debug
 ```
 
-At `debug` level, the server also logs the full decoded webhook payload for each
-event that has at least one subscriber.
-
 ## Version headers
 
-Every response from `whim-server` includes an `X-Whim-Proxy-Server` header
-with the server version. Every request replayed by `whim-client` to the local
-target includes an `X-Whim-Proxy-Client` header, so your local service can
-distinguish proxied traffic from direct calls.
+`whim-client` and `whim-server` versions are self-reported through
+`X-Whim-Proxy-Client` and `X-Whim-Proxy-Server` http headers respectively.
 
 ## Architecture
 
@@ -146,8 +146,8 @@ graph TD
         WS[Webhook Sender<br/>e.g. GitHub / Stripe]
     end
 
-    subgraph Public Server
-        SRV[whim-server<br/>:9000]
+    subgraph Public whim-proxy Server
+        SRV[whim-server]
         CH1[channel: uuid-a]
         CH2[channel: uuid-b]
         SRV --> CH1
@@ -161,14 +161,20 @@ graph TD
     end
 
     subgraph Developer Machine B
-        CLB[whim-client<br/>--channel uuid-b]
+        CLB[whim-client<br/>--channel uuid-a]
         LB[Local Service<br/>localhost:3000]
         CLB -->|HTTP replay| LB
     end
+    subgraph Developer Machine C
+        CLC[whim-client<br/>--channel uuid-b]
+        LC[Local Service<br/>localhost:3000]
+        CLC -->|HTTP replay| LC
+    end
 
-    WS -->|POST /hook/uuid-a| SRV
+    WS -->|POST /hook/<UUID>| SRV
     CH1 -->|WebSocket broadcast| CLA
-    CH2 -->|WebSocket broadcast| CLB
+    CH1 -->|WebSocket broadcast| CLB
+    CH2 -->|WebSocket broadcast| CLC
 ```
 
 ## Sequence
@@ -186,28 +192,20 @@ sequenceDiagram
     Note over Client,Server: connection held open
 
     Sender->>Server: POST /hook/{uuid}<br/>headers + body
-    Server-->>Sender: 200 OK  (X-Whim-Proxy-Server: <version>)
+    Server-->>Sender: 200 OK
 
     Server->>Server: serialise to WebhookEvent JSON<br/>{id, method, path, query, headers, body}
     Server->>Client: WebSocket message (WebhookEvent JSON)
 
     Client->>Client: deserialise event
-    Client->>Local: POST {target}{path}?{query}<br/>original headers + body<br/>X-Whim-Proxy-Client: <version>
+    Client->>Local: POST {target}{path}?{query}<br/>original headers + body
     Local-->>Client: 200 OK
 
     Note over Client,Server: if connection drops
     Client->>Server: reconnect with exponential backoff
 ```
 
-## How it works
-
-1. The server receives HTTP requests at `/hook/{uuid}` and rejects non-UUID channel names with `400`.
-2. It serialises the full request (method, path, query, headers, body) into a `WebhookEvent` JSON message.
-3. All WebSocket clients subscribed to that channel receive the message simultaneously.
-4. Each client re-issues the request verbatim to its configured `--target`, appending an `X-Whim-Proxy-Client` header.
-5. The client auto-reconnects with exponential backoff (1 s → 60 s) if the server drops.
-
-## Building
+## Developing
 
 ```bash
 make build     # cross-compile client for all platforms, embed in server, build local client
@@ -215,17 +213,3 @@ make test      # run tests with race detector
 make coverage  # generate coverage.html
 make clean     # remove bin/ and embedded client binaries
 ```
-
-`make build` cross-compiles `whim-client` for Linux, macOS, and Windows (both
-`amd64` and `arm64`), places the binaries in `internal/web/clients/`, then
-compiles the server — which embeds them via `//go:embed`. The running server
-serves them for download at `/clients/{filename}` and lists them on the home
-page (`/`).
-
-Running `go build ./cmd/server` directly (without `make`) produces a valid
-server binary that works fully, but without the embedded client binaries —
-the home page will show a link to GitHub Releases instead.
-
-The version string is embedded at build time from the nearest git tag
-(`git describe --tags --always --dirty`) and surfaced in the
-`X-Whim-Proxy-Server` / `X-Whim-Proxy-Client` headers.
