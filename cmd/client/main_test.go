@@ -149,7 +149,7 @@ func newWSServer(t *testing.T, fn func(*websocket.Conn)) (string, func()) {
 }
 
 func TestConnectDialError(t *testing.T) {
-	err := connect(zap.NewNop(), "ws://localhost:9", "http://localhost:9")
+	err := connect(zap.NewNop(), "ws://localhost:9", "http://localhost:9", nil)
 	if err == nil {
 		t.Fatal("expected error dialing closed port")
 	}
@@ -186,7 +186,7 @@ func TestConnectReceivesAndReplays(t *testing.T) {
 	defer close()
 
 	// connect returns when the WS server closes.
-	go connect(zap.NewNop(), wsURL, replayTarget.URL)
+	go connect(zap.NewNop(), wsURL, replayTarget.URL, nil)
 
 	select {
 	case <-received:
@@ -206,7 +206,7 @@ func TestConnectInvalidJSONContinues(t *testing.T) {
 	})
 	defer closeTS()
 
-	go func() { done <- connect(zap.NewNop(), wsURL, "http://localhost:9") }()
+	go func() { done <- connect(zap.NewNop(), wsURL, "http://localhost:9", nil) }()
 
 	select {
 	case err := <-done:
@@ -246,7 +246,7 @@ func TestConnectDialErrorWithHTTPResponse(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/"
-	err := connect(zap.NewNop(), wsURL, "http://localhost:9")
+	err := connect(zap.NewNop(), wsURL, "http://localhost:9", nil)
 	if err == nil {
 		t.Fatal("expected dial error")
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/whim-proxy/internal/web"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/time/rate"
 )
 
 var version = "dev"
@@ -37,7 +38,8 @@ type subscriber struct {
 type channel struct {
 	mu          sync.Mutex
 	subscribers map[*subscriber]struct{}
-	maxSubs     int // 0 = unlimited
+	maxSubs     int          // 0 = unlimited
+	limiter     *rate.Limiter // nil = no rate limit
 }
 
 func (c *channel) add(s *subscriber) error {
@@ -86,18 +88,22 @@ type hub struct {
 	mu          sync.Mutex
 	channels    map[string]*channel
 	connsByIP   map[string]int
-	maxChannels int // 0 = unlimited
-	maxSubs     int // passed to each new channel
-	maxPerIP    int // 0 = unlimited
+	maxChannels int        // 0 = unlimited
+	maxSubs     int        // passed to each new channel
+	maxPerIP    int        // 0 = unlimited
+	hookRate    rate.Limit // 0 = unlimited
+	hookBurst   int
 }
 
-func newHub(maxChannels, maxSubs, maxPerIP int) *hub {
+func newHub(maxChannels, maxSubs, maxPerIP int, hookRate rate.Limit, hookBurst int) *hub {
 	return &hub{
 		channels:    make(map[string]*channel),
 		connsByIP:   make(map[string]int),
 		maxChannels: maxChannels,
 		maxSubs:     maxSubs,
 		maxPerIP:    maxPerIP,
+		hookRate:    hookRate,
+		hookBurst:   hookBurst,
 	}
 }
 
@@ -128,9 +134,14 @@ func (h *hub) getOrCreate(name string) (*channel, error) {
 		if h.maxChannels > 0 && len(h.channels) >= h.maxChannels {
 			return nil, fmt.Errorf("service at capacity, channel creation temporarily disabled")
 		}
+		var lim *rate.Limiter
+		if h.hookRate > 0 {
+			lim = rate.NewLimiter(h.hookRate, h.hookBurst)
+		}
 		ch = &channel{
 			subscribers: make(map[*subscriber]struct{}),
 			maxSubs:     h.maxSubs,
+			limiter:     lim,
 		}
 		h.channels[name] = ch
 	}
@@ -174,17 +185,19 @@ func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 
 // server wires together the HTTP handlers and the hub.
 type server struct {
-	hub        *hub
-	upgrader   websocket.Upgrader
-	logger     *zap.Logger
-	eventStore store.EventStore
+	hub          *hub
+	upgrader     websocket.Upgrader
+	logger       *zap.Logger
+	eventStore   store.EventStore
+	maxBodyBytes int64
 }
 
-func newServer(logger *zap.Logger, eventStore store.EventStore, maxChannels, maxSubs, maxPerIP int) *server {
+func newServer(logger *zap.Logger, eventStore store.EventStore, maxChannels, maxSubs, maxPerIP int, hookRate rate.Limit, hookBurst int, maxBodyBytes int64) *server {
 	return &server{
-		hub:        newHub(maxChannels, maxSubs, maxPerIP),
-		logger:     logger,
-		eventStore: eventStore,
+		hub:          newHub(maxChannels, maxSubs, maxPerIP, hookRate, hookBurst),
+		logger:       logger,
+		eventStore:   eventStore,
+		maxBodyBytes: maxBodyBytes,
 		upgrader: websocket.Upgrader{
 			// Allow all origins for a local dev proxy tool.
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -210,13 +223,26 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	// Reject webhooks replayed by a whim-client — they carry this header and
+	// forwarding them back would create an amplification loop.
+	if r.Header.Get("X-Whim-Proxy-Client") != "" {
+		s.logger.Warn("loop detected", zap.String("channel", channelName), zap.String("remote", r.RemoteAddr))
+		http.Error(w, "loop detected: replayed webhooks are not accepted on /hook", http.StatusBadRequest)
+		return
+	}
+
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.maxBodyBytes+1))
 	if err != nil {
 		s.logger.Error("webhook body read error", zap.Error(err))
 		http.Error(w, "failed to read body", http.StatusInternalServerError)
 		return
 	}
-	defer r.Body.Close()
+	if int64(len(body)) > s.maxBodyBytes {
+		s.logger.Warn("webhook body too large", zap.String("channel", channelName), zap.Int64("limit", s.maxBodyBytes))
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
 
 	event := types.WebhookEvent{
 		ID:      generateID(),
@@ -240,6 +266,13 @@ func (s *server) hookHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+
+	if ch.limiter != nil && !ch.limiter.Allow() {
+		s.logger.Warn("webhook rate limit exceeded", zap.String("channel", channelName))
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
 	n := ch.broadcast(data)
 
 	if err := s.eventStore.Push(channelName, event); err != nil {
@@ -450,6 +483,9 @@ func main() {
 	maxChannels := flag.Int("max-channels", 100000, "max number of distinct channels tracked (0 = unlimited)")
 	maxClients := flag.Int("max-clients", 100, "max WebSocket subscribers per channel (0 = unlimited)")
 	maxClientsPerIP := flag.Int("max-clients-per-ip", 1000, "max WebSocket subscribers per source IP (0 = unlimited)")
+	maxHookRate := flag.Float64("max-hook-rate", 100, "max webhooks per second per channel (0 = unlimited)")
+	maxHookBurst := flag.Int("max-hook-burst", 200, "token bucket burst size for per-channel webhook rate limit")
+	maxBodyBytes := flag.Int64("max-body-bytes", 1<<20, "max webhook body size in bytes (default 1 MiB)")
 	flag.Parse()
 
 	logger, err := buildLogger(*logLevel, *jsonLog)
@@ -459,7 +495,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	srv := newServer(logger, initStore(logger, *redisURL, *redisTTL, *backlogSize), *maxChannels, *maxClients, *maxClientsPerIP)
+	srv := newServer(logger, initStore(logger, *redisURL, *redisTTL, *backlogSize), *maxChannels, *maxClients, *maxClientsPerIP, rate.Limit(*maxHookRate), *maxHookBurst, *maxBodyBytes)
 	logger.Info("server listening", zap.String("addr", *addr))
 	if err := http.ListenAndServe(*addr, buildRouter(logger, srv)); err != nil {
 		logger.Fatal("server fatal", zap.Error(err))

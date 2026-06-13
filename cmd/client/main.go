@@ -73,7 +73,8 @@ func replay(logger *zap.Logger, event types.WebhookEvent, target string) {
 
 // connect establishes a WebSocket connection and reads events until an error
 // occurs. Returns the error so the caller can decide whether to reconnect.
-func connect(logger *zap.Logger, wsURL string, target string) error {
+// sem limits concurrent replay goroutines; a nil sem means unbounded.
+func connect(logger *zap.Logger, wsURL string, target string, sem chan struct{}) error {
 	logger.Info("client connecting", zap.String("url", wsURL))
 
 	header := http.Header{}
@@ -108,7 +109,19 @@ func connect(logger *zap.Logger, wsURL string, target string) error {
 			continue
 		}
 
-		go replay(logger, event, target)
+		if sem == nil {
+			go replay(logger, event, target)
+			continue
+		}
+		select {
+		case sem <- struct{}{}:
+			go func(e types.WebhookEvent) {
+				defer func() { <-sem }()
+				replay(logger, e, target)
+			}(event)
+		default:
+			logger.Warn("replay concurrency limit reached, dropping event", zap.String("id", event.ID))
+		}
 	}
 }
 
@@ -172,6 +185,7 @@ func main() {
 	jsonLog := flag.Bool("json", false, "output logs in JSON format")
 	genUUID := flag.Bool("gen-uuid", false, "print a new UUID to stdout and exit")
 	logsFlag := flag.Bool("logs", false, "fetch and print the last received events for the channel, then exit")
+	maxReplayConcurrency := flag.Int("max-replay-concurrency", 10, "max concurrent webhook replays (0 = unlimited)")
 	flag.Parse()
 
 	if *genUUID {
@@ -210,10 +224,15 @@ func main() {
 	base.Path = "/subscribe/" + *channel
 	wsURL := base.String()
 
+	var sem chan struct{}
+	if *maxReplayConcurrency > 0 {
+		sem = make(chan struct{}, *maxReplayConcurrency)
+	}
+
 	backoff := initialBackoff
 
 	for {
-		err := connect(logger, wsURL, *target)
+		err := connect(logger, wsURL, *target, sem)
 		if err != nil {
 			logger.Warn("connection error, reconnecting",
 				zap.Error(err),
