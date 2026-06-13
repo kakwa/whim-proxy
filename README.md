@@ -27,27 +27,33 @@ Don't send sensitive data, cats cannot be trusted after all.
 ## Quick start
 
 ```bash
-# Build both binaries
+# Build client and server binaries
+git clone https://github.com/kakwa/whim-proxy && cd whim-proxy
 make build
 
-# 1. Start the proxy server on a public host (listens on :9000 by default)
-./bin/whim-server
+# Set a server listen 
+WHIM_SERVER=localhost:9000
 
-# 2. Generate a channel UUID
+# Generate a channel uuid (can be reused accross sessions)
 CHANNEL=$(./bin/whim-client --gen-uuid)
 
-# 3. Start a client on your laptop
-./bin/whim-client --server ws://<public-host>:9000 --channel "$CHANNEL" --target http://localhost:8080
+# Set the target Webhook url of your local event consumer
+TARGET=http://localhost:8080/webhook
 
-# 4. Configure your webhook sender to POST to that channel:
-curl -X POST http://<public-host>:9000/hook/"$CHANNEL" \
+# 1. Start the proxy server on a public host (listens on :9000 by default)
+./bin/whim-server -addr $WHIM_SERVER --log-level debug
+
+# 2. Start a client on your laptop (switch protos to wss:// and https:// if TLS)
+./bin/whim-client --server ws://$WHIM_SERVER \
+    --log-level debug \
+    --channel "$CHANNEL" \
+    --target "$TARGET"
+
+# 3. POST test webhook to channel:
+curl -X POST "http://$WHIM_SERVER/hook/$CHANNEL" \
      -H "Content-Type: application/json" \
      -d '{"event":"ping"}'
 ```
-
-The client replays the request to `http://localhost:8080` with the original
-method, path, query string, headers, and body intact. It reconnects
-automatically with exponential backoff if the server drops.
 
 ## Flags
 
